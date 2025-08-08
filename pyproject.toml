@@ -1,0 +1,12 @@
+[project]
+name = "pipeline-yolo"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.40.5",
+    "fiftyone>=1.7.2",
+    "numpy>=2.3.2",
+    "pandas>=2.3.1",
+]
