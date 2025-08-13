@@ -32,7 +32,7 @@ class SageMakerDataManager:
         """
         self.config = config or {}
         
-        # Extract AWS configuration
+        # extract aws configuration
         aws_config = get_aws_config(self.config)
         self.bucket = aws_config.get('bucket')
         self.prefix = aws_config.get('prefix', 'yolo-pipeline')
@@ -45,10 +45,9 @@ class SageMakerDataManager:
         self.region = region or self.sess.boto_region_name
         self.s3_client = boto3.client('s3', region_name=self.region)
         
-        # Ensure the destination bucket exists (create if missing)
+        # create bucket if it does not exist
         self._ensure_bucket_exists()
         
-        # S3 paths
         self.s3_train_data = None
         self.s3_validation_data = None
         
@@ -64,16 +63,13 @@ class SageMakerDataManager:
         Returns:
             True if object exists, False otherwise
         """
-        # Parse S3 path
-        if not s3_path.startswith('s3://'):
-            return False
-            
+        # extract bucket and key from s3 path
         path_parts = s3_path[5:].split('/', 1)
         bucket = path_parts[0]
         key = path_parts[1] if len(path_parts) > 1 else ''
         
         try:
-            # List objects with the prefix to check if any exist
+            # list objects with the prefix to check if any exist
             response = self.s3_client.list_objects_v2(Bucket=bucket, Prefix=key, MaxKeys=1)
             return 'Contents' in response and len(response['Contents']) > 0
         except ClientError:
@@ -86,13 +82,13 @@ class SageMakerDataManager:
             return True
         except ClientError as error:
             error_code = error.response.get('Error', {}).get('Code', '')
-            # Treat Not Found/NoSuchBucket as non-existent; other errors bubble up
+            # treat Not Found/NoSuchBucket as non-existent
             if error_code in ('404', 'NoSuchBucket'):
                 return False
-            # In some cases, 301 (moved) indicates wrong region; treat as exists
+            # treat 301 (moved) as exists
             if error_code in ('301',):
                 return True
-            # 403 may indicate it exists but access denied; assume exists to avoid create conflict
+            # treat 403 (access denied) as exists: TODO: check if this is correct
             if error_code in ('403',):
                 return True
             raise
@@ -103,7 +99,7 @@ class SageMakerDataManager:
             return
         print(f"Bucket '{self.bucket}' not found. Creating in region: {self.region}")
         try:
-            if self.region == 'us-east-1':
+            if self.region == 'us-east-1': # TODO: should this be in config?
                 self.s3_client.create_bucket(Bucket=self.bucket)
             else:
                 self.s3_client.create_bucket(
@@ -113,7 +109,7 @@ class SageMakerDataManager:
                     },
                 )
         except ClientError as error:
-            # If bucket already exists or owned by you, proceed; otherwise re-raise
+            # if bucket already exists or owned by you, proceed; otherwise re-raise
             error_code = error.response.get('Error', {}).get('Code', '')
             if error_code not in ('BucketAlreadyOwnedByYou', 'BucketAlreadyExists'):
                 raise
@@ -127,7 +123,7 @@ class SageMakerDataManager:
             where s3_paths is a dict with 'train' and 'validation' keys pointing to S3 prefixes
         """
         data_config = get_data_config(self.config)
-        # Allow optional overrides via config under data: { s3_train_prefix, s3_val_prefix }
+        # allow optional overrides via config under data: { s3_train_prefix, s3_val_prefix }
         expected_train_s3 = (
             data_config.get('s3_train_prefix')
             or f"s3://{self.bucket}/{self.prefix}/train/"
@@ -138,7 +134,7 @@ class SageMakerDataManager:
             or f"s3://{self.bucket}/{self.prefix}/val/"
         )
         
-        # Check if any objects exist under the prefixes
+        # check if any objects exist under the prefixes
         train_exists = self._s3_object_exists(expected_train_s3)
         validation_exists = self._s3_object_exists(expected_validation_s3)
         
@@ -163,10 +159,10 @@ class SageMakerDataManager:
         Returns:
             Tuple of (train_s3_prefix, validation_s3_prefix)
         """
-        # Check if data already exists in S3
+        # check if data already exists in S3
         train_exists, validation_exists, existing_s3_paths = self.check_data_in_s3()
         
-        # Determine local directories (allow overrides via config)
+        # determine local directories - can be overridden via config
         data_config = get_data_config(self.config)
         train_dir = data_config.get('train_dir') or os.path.join('dataset', 'yolo_dataset', 'train')
         val_dir = data_config.get('val_dir') or data_config.get('validation_dir') or os.path.join('dataset', 'yolo_dataset', 'val')
@@ -176,7 +172,7 @@ class SageMakerDataManager:
         if not os.path.isdir(val_dir):
             raise FileNotFoundError(f"Validation directory not found: {val_dir}")
         
-        # Expected S3 prefixes
+        # expected s3 prefixes
         expected_train_s3 = (
             data_config.get('s3_train_prefix')
             or f"s3://{self.bucket}/{self.prefix}/train/"
@@ -193,7 +189,7 @@ class SageMakerDataManager:
             self.s3_validation_data = expected_validation_s3
             return self.s3_train_data, self.s3_validation_data
         
-        # Upload training directory if needed
+        # force upload or if training/validation data does not exist in S3, upload it
         if force_upload or not train_exists:
             print(f"Uploading training directory: {train_dir}")
             train_channel = f"{self.prefix}/train"
@@ -203,8 +199,7 @@ class SageMakerDataManager:
         else:
             self.s3_train_data = expected_train_s3
             print(f"Using existing training prefix: {self.s3_train_data}")
-        
-        # Upload validation directory if needed
+
         if force_upload or not validation_exists:
             print(f"Uploading validation directory: {val_dir}")
             validation_channel = f"{self.prefix}/val"
@@ -215,9 +210,8 @@ class SageMakerDataManager:
             self.s3_validation_data = expected_validation_s3
             print(f"Using existing validation prefix: {self.s3_validation_data}")
         
-        # Print reminder about config
         if not data_config.get('s3_train_prefix') or not data_config.get('s3_val_prefix'):
-            print(f"\n💡 Consider updating your config.yaml with these S3 prefixes under 'data':")
+            print(f"\n Consider updating your config.yaml with these S3 prefixes under 'data':")
             print(f"   s3_train_prefix: \"{self.s3_train_data}\"")
             print(f"   s3_val_prefix: \"{self.s3_validation_data}\"")
             print(f"   train_dir: \"{os.path.abspath(train_dir)}\"")
