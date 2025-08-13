@@ -78,13 +78,6 @@ class SageMakerDataManager:
             return 'Contents' in response and len(response['Contents']) > 0
         except ClientError:
             return False
-    
-    def _get_local_file_size(self, file_path: str) -> int:
-        """Get the size of a local file in bytes."""
-        try:
-            return os.path.getsize(file_path)
-        except OSError:
-            return 0
 
     def _bucket_exists(self, bucket_name: str) -> bool:
         """Check if an S3 bucket exists and is accessible."""
@@ -124,21 +117,6 @@ class SageMakerDataManager:
             error_code = error.response.get('Error', {}).get('Code', '')
             if error_code not in ('BucketAlreadyOwnedByYou', 'BucketAlreadyExists'):
                 raise
-    
-    def _get_s3_object_size(self, s3_path: str) -> int:
-        """Get the size of an S3 object in bytes."""
-        if not s3_path.startswith('s3://'):
-            return 0
-            
-        path_parts = s3_path[5:].split('/', 1)
-        bucket = path_parts[0]
-        key = path_parts[1] if len(path_parts) > 1 else ''
-        
-        try:
-            response = self.s3_client.head_object(Bucket=bucket, Key=key)
-            return response['ContentLength']
-        except ClientError:
-            return 0
     
     def check_data_in_s3(self) -> Tuple[bool, bool, Dict[str, str]]:
         """
@@ -247,30 +225,6 @@ class SageMakerDataManager:
         
         return self.s3_train_data, self.s3_validation_data
     
-    def get_s3_data_paths(self) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Get S3 paths for training and validation data.
-        
-        Returns:
-            Tuple of (train_s3_path, validation_s3_path)
-        """
-        return self.s3_train_data, self.s3_validation_data
-    
-    def set_s3_paths(self, train_s3_path: str, validation_s3_path: str):
-        """
-        Manually set S3 paths for training and validation data.
-        Useful when data is already uploaded by external processes.
-        
-        Args:
-            train_s3_path: S3 path to training data
-            validation_s3_path: S3 path to validation data
-        """
-        self.s3_train_data = train_s3_path
-        self.s3_validation_data = validation_s3_path
-        
-        print(f"Set S3 data paths:")
-        print(f"  Train: {self.s3_train_data}")
-        print(f"  Validation: {self.s3_validation_data}")
 
 
 def main():
