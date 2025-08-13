@@ -1,8 +1,0 @@
-# YOLO dataset configuration
-# Paths are relative to this file location when training locally
-# When running in SageMaker, paths will be relative to /opt/ml/input/data/training/
-
-train: train/images
-val: val/images
-nc: 1
-names: ['person']
