@@ -1,0 +1,169 @@
+# SageMaker Training Configuration for YOLO Models
+
+# AWS Configuration
+aws:
+  bucket: "cyudhist-pipeline-yolo-503561429929"
+  prefix: "yolo-pipeline"
+  role_arn: "arn:aws:iam::503561429929:role/SageMakerExecutionRole-Pipeline-YOLO"
+  region: null  # Will use default session region if null
+
+
+# Data Configuration
+data:
+  dataset_dir: dataset/yolo_dataset           # Complete YOLO dataset directory (contains data.yaml)
+  train_dir: dataset/yolo_dataset/train
+  val_dir: dataset/yolo_dataset/val
+  s3_dataset_prefix: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo_dataset/  # Complete dataset with data.yaml (PREFERRED)
+  s3_train_prefix: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo_dataset/  # Updated to match actual location
+  s3_val_prefix: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo_dataset/    # Updated to match actual location
+
+
+# Hyperparameters
+hyperparameters:
+  # choose one of the following models:
+  # yolo10
+  #   - yolov10n.pt
+  #   - yolov10s.pt
+  #   - yolov10m.pt
+  #   - yolov10b.pt
+  #   - yolov10l.pt
+  #   - yolov10x.pt
+
+  # yolo11
+  #   - yolo11n.pt
+  #   - yolo11s.pt
+  #   - yolo11m.pt
+  #   - yolo11l.pt
+  #   - yolo11x.pt
+
+  # yolo12
+  #   - yolo12n.pt
+  #   - yolo12s.pt
+  #   - yolo12m.pt
+  #   - yolo12l.pt
+  #   - yolo12x.pt
+  model_name: yolo12s.pt
+
+# Training Configuration
+training:
+  instance_type: ml.g4dn.xlarge
+  instance_count: 1
+  volume_size: 30
+  max_run: 600  # 10 minutes max for testing
+  image_size: 416  # smaller for faster training
+  epochs: 2
+  batch_size: 4  # smaller batch for testing
+  model_dir: ./runs/train
+  output_dir: ./output
+  
+  # Learning Rate & Optimization
+  lr0: 0.01                    # Initial learning rate
+  lrf: 0.1                     # Final OneCycleLR learning rate (lr0 * lrf)
+  momentum: 0.937              # SGD momentum/Adam beta1
+  weight_decay: 0.0005         # Optimizer weight decay
+  warmup_epochs: 3.0           # Warmup epochs (fractions ok)
+  warmup_momentum: 0.8         # Warmup initial momentum
+  warmup_bias_lr: 0.1          # Warmup initial bias lr
+  cos_lr: true                 # Use cosine LR scheduler
+  optimizer: AdamW             # Optimizer (SGD, Adam, AdamW, auto)
+  
+  # Data Augmentation
+  hsv_h: 0.015                 # Image HSV-Hue augmentation (fraction)
+  hsv_s: 0.7                   # Image HSV-Saturation augmentation (fraction)
+  hsv_v: 0.4                   # Image HSV-Value augmentation (fraction)
+  degrees: 10.0                # Image rotation (+/- deg)
+  translate: 0.1               # Image translation (+/- fraction)
+  scale: 0.5                   # Image scale (+/- gain)
+  shear: 0.0                   # Image shear (+/- deg)
+  perspective: 0.0             # Image perspective (+/- fraction)
+  flipud: 0.0                  # Image flip up-down (probability)
+  fliplr: 0.5                  # Image flip left-right (probability)
+  mosaic: 1.0                  # Image mosaic (probability)
+  mixup: 0.1                   # Image mixup (probability)
+  copy_paste: 0.0              # Segment copy-paste (probability)
+  
+  # Loss Function Weights
+  box: 7.5                     # Box loss gain
+  cls: 0.5                     # Class loss gain
+  dfl: 1.5                     # DFL loss gain
+  fl_gamma: 0.0                # Focal loss gamma (EfficientDet style)
+  label_smoothing: 0.1         # Label smoothing (fraction)
+  
+  # Advanced Training Options
+  patience: 50                 # EarlyStopping patience (epochs without improvement)
+  workers: 8                   # Max dataloader workers
+  dropout: 0.1                 # Use dropout regularization
+  save_period: -1              # Save checkpoint every x epochs (-1 = disabled)
+  seed: 0                      # Global training seed
+  deterministic: true          # Force deterministic training
+  single_cls: false            # Treat as single-class dataset
+  verbose: true                # Verbose output
+  amp: true                    # Automatic Mixed Precision training
+  fraction: 1.0                # Dataset fraction to train on
+  profile: false               # Profile ONNX and TensorRT speeds
+  freeze: null                 # Freeze layers (backbone, neck, head, etc.)
+  multi_scale: false           # Multi-scale training
+  overlap_mask: true           # Masks should overlap during training
+  mask_ratio: 4                # Mask downsample ratio
+  
+  # Model-Specific Parameters
+  pretrained: true             # Use pretrained model
+  device: ''                   # CUDA device, i.e. 0 or 0,1,2,3 or cpu
+  dnn: false                   # Use OpenCV DNN for ONNX inference
+  half: false                  # Use FP16 half-precision inference
+  int8: false                  # Use INT8 quantization
+
+# Hyperparameter Tuning Configuration (DISABLED FOR TESTING)
+tuning:
+  enabled: false  # Keep disabled for initial testing
+  max_jobs: 2  # reduced for testing
+  max_parallel_jobs: 1
+  objective_metric: mAP_0.5
+  objective_type: Maximize
+  hyperparameter_ranges:
+    batch_size:
+      type: categorical
+      values: [2, 4, 8]  # smaller values for testing
+    image_size:
+      type: categorical
+      values: [320, 416, 512]  # smaller sizes for testing
+    lr0:
+      type: continuous
+      min: 0.001
+      max: 0.1
+    weight_decay:
+      type: continuous
+      min: 0.0001
+      max: 0.001
+    dropout:
+      type: continuous
+      min: 0.0
+      max: 0.3
+    hsv_h:
+      type: continuous
+      min: 0.0
+      max: 0.1
+    degrees:
+      type: continuous
+      min: 0.0
+      max: 20.0
+    box:
+      type: continuous
+      min: 5.0
+      max: 10.0
+    cls:
+      type: continuous
+      min: 0.3
+      max: 1.0
+    label_smoothing:
+      type: continuous
+      min: 0.0
+      max: 0.3
+    optimizer:
+      type: categorical
+      values: ["SGD", "Adam", "AdamW"]
+
+# Runtime Configuration
+runtime:
+  wait_for_completion: true
+  show_logs: true
