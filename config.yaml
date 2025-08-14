@@ -163,7 +163,29 @@ tuning:
       type: categorical
       values: ["SGD", "Adam", "AdamW"]
 
+# Pipeline Configuration
+pipeline:
+  # Execution behavior
+  dry_run: false                   # Set to true to create pipeline without executing
+  enable_caching: false            # Enable step caching for faster re-runs
+  auto_approve_models: false       # Auto-approve registered models (use with caution)
+  
+  name: "yolo-training-pipeline"                    # Pipeline name (static)
+  training_step_name: "YOLOTrainingStep"            # Training step name
+  registration_step_name: "YOLOModelRegistrationStep"  
+  model_package_group_name: "yolo-model-package-group"  
+
+# Model Validation Configuration
+validation:
+  # Model quality thresholds for SageMaker Model Registry
+  min_mAP_0_5: 0.3                # Minimum acceptable mAP@0.5
+  min_precision: 0.5               # Minimum acceptable precision  
+  min_recall: 0.4                  # Minimum acceptable recall
+  max_model_size_mb: 500          # Maximum model size in MB
+  max_inference_time_ms: 100      # Maximum inference time in milliseconds
+
 # Runtime Configuration
 runtime:
-  wait_for_completion: true
-  show_logs: true
+  wait_for_completion: true        # Wait for pipeline execution to complete
+  show_logs: true                  # Show CloudWatch logs during execution
+  display_metrics: true            # Automatically display training metrics after completion
