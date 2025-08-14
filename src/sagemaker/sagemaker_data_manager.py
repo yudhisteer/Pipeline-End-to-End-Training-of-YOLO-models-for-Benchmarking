@@ -123,29 +123,42 @@ class SageMakerDataManager:
             where s3_paths is a dict with 'train' and 'validation' keys pointing to S3 prefixes
         """
         data_config = get_data_config(self.config)
-        # allow optional overrides via config under data: { s3_train_prefix, s3_val_prefix }
+        # Check for complete YOLO dataset (preferred) or fallback to separate train/val
+        expected_dataset_s3 = (
+            data_config.get('s3_dataset_prefix')
+            or f"s3://{self.bucket}/{self.prefix}/yolo_dataset/"
+        )
         expected_train_s3 = (
             data_config.get('s3_train_prefix')
-            or f"s3://{self.bucket}/{self.prefix}/train/"
+            or expected_dataset_s3
         )
         expected_validation_s3 = (
             data_config.get('s3_val_prefix')
             or data_config.get('s3_validation_prefix')
-            or f"s3://{self.bucket}/{self.prefix}/val/"
+            or expected_dataset_s3
         )
         
-        # check if any objects exist under the prefixes
-        train_exists = self._s3_object_exists(expected_train_s3)
-        validation_exists = self._s3_object_exists(expected_validation_s3)
+        # Check if complete dataset exists (preferred - contains data.yaml)
+        dataset_exists = self._s3_object_exists(os.path.join(expected_dataset_s3, 'data.yaml'))
+        
+        if dataset_exists:
+            # Complete dataset exists
+            train_exists = True
+            validation_exists = True
+            print(f"S3 data check results:")
+            print(f"  Complete YOLO dataset exists: {dataset_exists} ({expected_dataset_s3})")
+        else:
+            # Fallback: check separate train/val directories
+            train_exists = self._s3_object_exists(expected_train_s3)
+            validation_exists = self._s3_object_exists(expected_validation_s3)
+            print(f"S3 data check results:")
+            print(f"  Training prefix exists: {train_exists} ({expected_train_s3})")
+            print(f"  Validation prefix exists: {validation_exists} ({expected_validation_s3})")
         
         s3_paths = {
-            'train': expected_train_s3 if train_exists else expected_train_s3,
-            'validation': expected_validation_s3 if validation_exists else expected_validation_s3,
+            'train': expected_dataset_s3 if dataset_exists else expected_train_s3,
+            'validation': expected_dataset_s3 if dataset_exists else expected_validation_s3,
         }
-        
-        print(f"S3 data check results:")
-        print(f"  Training prefix exists: {train_exists} ({expected_train_s3})")
-        print(f"  Validation prefix exists: {validation_exists} ({expected_validation_s3})")
         
         return train_exists, validation_exists, s3_paths
     
@@ -164,58 +177,52 @@ class SageMakerDataManager:
         
         # determine local directories - can be overridden via config
         data_config = get_data_config(self.config)
-        train_dir = data_config.get('train_dir') or os.path.join('dataset', 'yolo_dataset', 'train')
-        val_dir = data_config.get('val_dir') or data_config.get('validation_dir') or os.path.join('dataset', 'yolo_dataset', 'val')
         
+        # For YOLO, we need to upload the entire dataset directory that contains data.yaml
+        dataset_dir = data_config.get('dataset_dir') or os.path.join('dataset', 'yolo_dataset')
+        train_dir = data_config.get('train_dir') or os.path.join(dataset_dir, 'train')
+        val_dir = data_config.get('val_dir') or data_config.get('validation_dir') or os.path.join(dataset_dir, 'val')
+        data_yaml_path = os.path.join(dataset_dir, 'data.yaml')
+        
+        if not os.path.isdir(dataset_dir):
+            raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
         if not os.path.isdir(train_dir):
             raise FileNotFoundError(f"Training directory not found: {train_dir}")
         if not os.path.isdir(val_dir):
             raise FileNotFoundError(f"Validation directory not found: {val_dir}")
+        if not os.path.isfile(data_yaml_path):
+            raise FileNotFoundError(f"YOLO data.yaml file not found: {data_yaml_path}")
         
-        # expected s3 prefixes
-        expected_train_s3 = (
-            data_config.get('s3_train_prefix')
-            or f"s3://{self.bucket}/{self.prefix}/train/"
+        # expected s3 prefixes - now pointing to complete dataset
+        expected_dataset_s3 = (
+            data_config.get('s3_dataset_prefix')
+            or f"s3://{self.bucket}/{self.prefix}/yolo_dataset/"
         )
-        expected_validation_s3 = (
-            data_config.get('s3_val_prefix')
-            or data_config.get('s3_validation_prefix')
-            or f"s3://{self.bucket}/{self.prefix}/val/"
-        )
+        expected_train_s3 = expected_dataset_s3  # For backward compatibility
+        expected_validation_s3 = expected_dataset_s3  # For backward compatibility
         
-        if not force_upload and train_exists and validation_exists:
-            print("Data already exists in S3. Skipping upload.")
-            self.s3_train_data = expected_train_s3
-            self.s3_validation_data = expected_validation_s3
+        # Check if complete dataset exists (contains data.yaml)
+        dataset_exists = self._s3_object_exists(os.path.join(expected_dataset_s3, 'data.yaml'))
+        
+        if not force_upload and dataset_exists:
+            print("Complete YOLO dataset already exists in S3. Skipping upload.")
+            self.s3_train_data = expected_dataset_s3
+            self.s3_validation_data = expected_dataset_s3
             return self.s3_train_data, self.s3_validation_data
         
-        # force upload or if training/validation data does not exist in S3, upload it
-        if force_upload or not train_exists:
-            print(f"Uploading training directory: {train_dir}")
-            train_channel = f"{self.prefix}/train"
-            self.sess.upload_data(path=train_dir, bucket=self.bucket, key_prefix=train_channel)
-            self.s3_train_data = expected_train_s3
-            print(f"Training data uploaded to prefix: {self.s3_train_data}")
-        else:
-            self.s3_train_data = expected_train_s3
-            print(f"Using existing training prefix: {self.s3_train_data}")
-
-        if force_upload or not validation_exists:
-            print(f"Uploading validation directory: {val_dir}")
-            validation_channel = f"{self.prefix}/val"
-            self.sess.upload_data(path=val_dir, bucket=self.bucket, key_prefix=validation_channel)
-            self.s3_validation_data = expected_validation_s3
-            print(f"Validation data uploaded to prefix: {self.s3_validation_data}")
-        else:
-            self.s3_validation_data = expected_validation_s3
-            print(f"Using existing validation prefix: {self.s3_validation_data}")
+        # Upload the complete dataset directory (includes data.yaml, train/, val/)
+        print(f"Uploading complete YOLO dataset directory: {dataset_dir}")
+        dataset_channel = f"{self.prefix}/yolo_dataset"
+        self.sess.upload_data(path=dataset_dir, bucket=self.bucket, key_prefix=dataset_channel)
+        self.s3_train_data = expected_dataset_s3
+        self.s3_validation_data = expected_dataset_s3
+        print(f"Complete dataset uploaded to prefix: {expected_dataset_s3}")
+        print(f"  - Includes: data.yaml, train/images, train/labels, val/images, val/labels")
         
-        if not data_config.get('s3_train_prefix') or not data_config.get('s3_val_prefix'):
-            print(f"\n Consider updating your config.yaml with these S3 prefixes under 'data':")
-            print(f"   s3_train_prefix: \"{self.s3_train_data}\"")
-            print(f"   s3_val_prefix: \"{self.s3_validation_data}\"")
-            print(f"   train_dir: \"{os.path.abspath(train_dir)}\"")
-            print(f"   val_dir: \"{os.path.abspath(val_dir)}\"")
+        if not data_config.get('s3_dataset_prefix'):
+            print(f"\n Consider updating your config.yaml with this S3 prefix under 'data':")
+            print(f"   s3_dataset_prefix: \"{expected_dataset_s3}\"")
+            print(f"   dataset_dir: \"{os.path.abspath(dataset_dir)}\"")
         
         return self.s3_train_data, self.s3_validation_data
     
