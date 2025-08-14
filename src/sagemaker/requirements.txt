@@ -1,0 +1,7 @@
+ultralytics
+pandas
+boto3
+opencv-python
+pyyaml
+rich
+
