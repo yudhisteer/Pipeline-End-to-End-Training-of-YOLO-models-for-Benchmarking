@@ -4,7 +4,13 @@ Minimal YOLO training entry point for SageMaker.
 """
 
 import os
+import sys
 from ultralytics import YOLO
+
+# Add parent directory to path for imports
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from utils import generate_model_metrics
+
 
 def main():
     """Main training function for SageMaker."""
@@ -112,6 +118,9 @@ def main():
         exist_ok=True
     )
     print(f"Training results: {results}")
+    
+    # Generate validation metrics for SageMaker Model Registry
+    generate_model_metrics(results, model_dir)
     
     # Export model
     model.export(format="onnx", dynamic=True)
