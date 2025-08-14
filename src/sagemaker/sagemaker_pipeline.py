@@ -51,7 +51,7 @@ from sagemaker.pytorch import PyTorch
 from sagemaker.inputs import TrainingInput
 from sagemaker.workflow.pipeline_context import PipelineSession
 from sagemaker.workflow.parameters import ParameterString, ParameterInteger
-from sagemaker.model_metrics import ModelMetrics, MetricSource
+from sagemaker.model_metrics import ModelMetrics, MetricsSource
 
 # Add parent directory to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -298,6 +298,45 @@ class YOLOSageMakerPipeline:
         for key, value in hyperparams.items():
             print(f"  {key}: {value}")
     
+    def _prepare_config_input(self) -> TrainingInput:
+        """
+        Upload config.yaml to S3 and prepare it as a training input.
+        
+        Returns:
+            TrainingInput for config.yaml, or None if config not found
+        """
+        import boto3
+        
+        # Check if config.yaml exists locally
+        config_path = "config.yaml"
+        if not os.path.exists(config_path):
+            print("⚠️ config.yaml not found locally - training will use command-line args only")
+            return None
+        
+        try:
+            # Upload config.yaml to S3 (in a directory for TrainingInput)
+            s3_config_key = f"{self.prefix}/config/{self.timestamp}/config.yaml"
+            s3_config_dir = f"s3://{self.bucket}/{self.prefix}/config/{self.timestamp}/"
+            
+            s3_client = boto3.client('s3', region_name=self.region)
+            s3_client.upload_file(config_path, self.bucket, s3_config_key)
+            
+            print(f"✅ Uploaded config.yaml to: s3://{self.bucket}/{s3_config_key}")
+            
+            # Create TrainingInput for config directory
+            config_input = TrainingInput(
+                s3_data=s3_config_dir,
+                distribution="FullyReplicated",
+                s3_data_type="S3Prefix"
+            )
+            
+            return config_input
+            
+        except Exception as e:
+            print(f"⚠️ Failed to upload config.yaml to S3: {e}")
+            print("Training will use command-line args only")
+            return None
+    
     def create_training_step(self) -> TrainingStep:
         """
         Create the training step for the pipeline.
@@ -315,22 +354,33 @@ class YOLOSageMakerPipeline:
             s3_data_type="S3Prefix"
         )
         
+        # Upload config.yaml to S3 and create config input
+        config_input = self._prepare_config_input()
+        
         # Configure caching based on config
         cache_config = None
         if self.pipeline_config.get('enable_caching', False):
             from sagemaker.workflow.pipeline_context import PipelineSession
             cache_config = CacheConfig(enable_caching=True, expire_after="PT1H")  # 1 hour cache
         
-        # Create training step
+        # Create training step with both data and config inputs
+        inputs = {"training": training_input}
+        if config_input:
+            inputs["config"] = config_input
+        
         training_step = TrainingStep(
             name=self.training_step_name,
             estimator=self.estimator,
-            inputs={"training": training_input},
+            inputs=inputs,
             cache_config=cache_config,
         )
         
         print(f"Created training step: {self.training_step_name}")
         print(f"  Training data input: {self.s3_training_data}")
+        if config_input:
+            print(f"  Config input: Available (config.yaml will be prioritized)")
+        else:
+            print(f"  Config input: Not available (using command-line args)")
         
         return training_step
     
@@ -380,11 +430,11 @@ class YOLOSageMakerPipeline:
         """
         
         model_statistics = ModelMetrics(
-            model_statistics=MetricSource(
+            model_statistics=MetricsSource(
                 s3_uri=f"{self.s3_model_output}/evaluation.json",  # Validation results
                 content_type="application/json"
             ),
-            model_constraints=MetricSource(
+            model_constraints=MetricsSource(
                 s3_uri=f"{self.s3_model_output}/constraints.json",  # Model constraints
                 content_type="application/json"
             )
