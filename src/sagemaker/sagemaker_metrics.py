@@ -13,43 +13,67 @@ from rich import box
 from rich.columns import Columns
 import pandas as pd
 
-def get_training_job_metrics(specific_job_name=None):
+def display_training_job_metrics(training_job_name: str):
+    """
+    Standalone function to display metrics for a specific training job.
+    
+    Args:
+        training_job_name: Name of the SageMaker training job
+    """
+    console = Console()
+    
+    # Display banner
+    console.print(Panel(
+        "[bold blue]SageMaker Training Job Metrics Extractor[/bold blue]\n"
+        "[dim]Fetches and displays training metrics from SageMaker jobs[/dim]",
+        title="[bold green]🚀 YOLO Training Metrics[/bold green]",
+        border_style="green",
+        padding=(1, 2)
+    ))
+    
+    console.print(f"[bold cyan]🎯 Displaying metrics for:[/bold cyan] [yellow]{training_job_name}[/yellow]\n")
+    
+    get_training_job_metrics(training_job_name)
+
+def get_training_job_metrics(specific_job_name: str = None) -> None:
     console = Console()
     sm = boto3.client('sagemaker')
     
-    # First, let's list all recent training jobs
-    console.print("\n[bold blue]📋 Recent Training Jobs[/bold blue]", style="bold")
-    
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Fetching training jobs...", total=None)
-        all_jobs = sm.list_training_jobs(
-            SortBy='CreationTime',
-            SortOrder='Descending',
-            MaxResults=10
-        )
-        progress.update(task, completed=True)
+    # Only list jobs if no specific job is provided
+    if not specific_job_name:
+        # First, let's list all recent training jobs
+        console.print("\n[bold blue]📋 Recent Training Jobs[/bold blue]", style="bold")
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Fetching training jobs...", total=None)
+            all_jobs = sm.list_training_jobs(
+                SortBy='CreationTime',
+                SortOrder='Descending',
+                MaxResults=10
+            )
+            progress.update(task, completed=True)
 
-    # Create table for training jobs
-    jobs_table = Table(title="Recent Training Jobs", box=box.ROUNDED)
-    jobs_table.add_column("#", style="cyan", no_wrap=True, width=3)
-    jobs_table.add_column("Job Name", style="magenta", min_width=30)
-    jobs_table.add_column("Status", justify="center", width=12)
-    jobs_table.add_column("Creation Time", style="green", width=20)
-    
-    for i, job in enumerate(all_jobs['TrainingJobSummaries']):
-        status_style = "green" if job['TrainingJobStatus'] == 'Completed' else "yellow" if job['TrainingJobStatus'] == 'InProgress' else "red"
-        jobs_table.add_row(
-            str(i+1),
-            job['TrainingJobName'],
-            f"[{status_style}]{job['TrainingJobStatus']}[/{status_style}]",
-            job['CreationTime'].strftime("%Y-%m-%d %H:%M:%S")
-        )
-    
-    console.print(jobs_table)
+        # Create table for training jobs
+        jobs_table = Table(title="Recent Training Jobs", box=box.ROUNDED)
+        jobs_table.add_column("#", style="cyan", no_wrap=True, width=3)
+        jobs_table.add_column("Job Name", style="magenta", min_width=30)
+        jobs_table.add_column("Status", justify="center", width=12)
+        jobs_table.add_column("Creation Time", style="green", width=20)
+        
+        for i, job in enumerate(all_jobs['TrainingJobSummaries']):
+            status_style = "green" if job['TrainingJobStatus'] == 'Completed' else "yellow" if job['TrainingJobStatus'] == 'InProgress' else "red"
+            jobs_table.add_row(
+                str(i+1),
+                job['TrainingJobName'],
+                f"[{status_style}]{job['TrainingJobStatus']}[/{status_style}]",
+                job['CreationTime'].strftime("%Y-%m-%d %H:%M:%S")
+            )
+        
+        console.print(jobs_table)
 
     # Determine which job to analyze
     if specific_job_name:
@@ -68,7 +92,7 @@ def get_training_job_metrics(specific_job_name=None):
             console.print(f"[bold red]❌ Error:[/bold red] Training job '[yellow]{specific_job_name}[/yellow]' not found: {e}")
             return
     else:
-        # Find the latest COMPLETED job
+        # Find the latest COMPLETED job (all_jobs was fetched above)
         completed_jobs = [job for job in all_jobs['TrainingJobSummaries'] if job['TrainingJobStatus'] == 'Completed']
         
         if not completed_jobs:
@@ -178,21 +202,6 @@ def get_training_job_metrics(specific_job_name=None):
             title="[red]❌ Extraction Error[/red]",
             border_style="red"
         ))
-    
-    # Alternative methods panel
-    s3_uri = job_details["ModelArtifacts"]["S3ModelArtifacts"]
-    alternative_methods = [
-        f"[cyan]1. Download S3 artifacts:[/cyan]\n   [dim]aws s3 cp {s3_uri} .[/dim]",
-        f"[cyan]2. CloudWatch Logs:[/cyan]\n   [dim]aws logs describe-log-groups --log-group-name-prefix /aws/sagemaker/TrainingJobs[/dim]",
-        f"[cyan]3. SageMaker Console:[/cyan]\n   [dim]https://console.aws.amazon.com/sagemaker/[/dim]"
-    ]
-    
-    # console.print(Panel(
-    #     "\n\n".join(alternative_methods),
-    #     title="[bold blue]🛠️ Alternative Ways to Get Metrics[/bold blue]",
-    #     border_style="blue",
-    #     padding=(1, 2)
-    # ))
 
 def extract_metrics_from_s3(s3_uri, console):
     """Extract evaluation_metrics.json from S3 model artifacts"""
@@ -311,8 +320,22 @@ if __name__ == "__main__":
         specific_job = sys.argv[1]
         console.print(f"[bold yellow]💡 Usage:[/bold yellow] python {sys.argv[0]} [training_job_name]")
         console.print(f"[bold cyan]🔍 Looking for job:[/bold cyan] [yellow]{specific_job}[/yellow]\n")
-        get_training_job_metrics(specific_job)
+        display_training_job_metrics(specific_job)
     else:
         console.print(f"[bold yellow]💡 Usage:[/bold yellow] python {sys.argv[0]} [training_job_name]")
         console.print(f"[bold cyan]📋 No job specified, using latest completed job[/bold cyan]\n")
         get_training_job_metrics()
+
+
+# Example usage:
+"""
+YOLO SageMaker Training Metrics - Usage Examples
+
+Command Line Usage:
+# Display metrics for specific training job
+python src/sagemaker/sagemaker_metrics.py pipelines-lwyromzfdl9t-YOLOTrainingStep-931HVQyPKu
+
+# Display metrics for latest completed job
+python src/sagemaker/sagemaker_metrics.py
+
+"""
