@@ -1,48 +1,14 @@
 """
 Comprehensive SageMaker Pipeline for YOLO Model Training and Registration.
-
-This script creates and executes a complete SageMaker pipeline that:
-1. Trains a YOLO model using the configured dataset
-2. Registers the trained model in the SageMaker Model Registry
-3. Can be run standalone with proper configuration
-
-The pipeline integrates with the existing sagemaker_trainer.py and yolo_entrypoint.py
-components for a complete end-to-end training workflow.
-
-Usage Examples:
-
-1. Run directly (uses config.yaml):
-   python src/sagemaker/sagemaker_pipeline.py
-
-2. Use with custom config path (via environment variable):
-   export YOLO_CONFIG_PATH=/path/to/custom/config.yaml
-   python src/sagemaker/sagemaker_pipeline.py
-
-3. Use in other Python scripts:
-   from src.sagemaker.sagemaker_pipeline import run_yolo_pipeline
-   result = run_yolo_pipeline("config.yaml")
-
-4. Display metrics for specific training job:
-   from src.sagemaker.sagemaker_metrics import display_training_job_metrics
-   display_training_job_metrics("your-training-job-name")
-
-Configuration:
-All behavior is controlled through config.yaml:
-- pipeline.dry_run: Set to true to create pipeline without executing
-- pipeline.enable_caching: Enable step caching for faster re-runs  
-- pipeline.auto_approve_models: Auto-approve registered models
-- runtime.wait_for_completion: Wait for pipeline execution to complete
-- runtime.show_logs: Show CloudWatch logs during execution
-- runtime.display_metrics: Automatically display training metrics after completion
 """
 
 import os
-import sys
 import boto3
+import time
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-# SageMaker imports
+
 import sagemaker
 from sagemaker.workflow.pipeline import Pipeline
 from sagemaker.workflow.steps import TrainingStep, CacheConfig
@@ -50,12 +16,10 @@ from sagemaker.workflow.step_collections import RegisterModel
 from sagemaker.pytorch import PyTorch
 from sagemaker.inputs import TrainingInput
 from sagemaker.workflow.pipeline_context import PipelineSession
-from sagemaker.workflow.parameters import ParameterString, ParameterInteger
 from sagemaker.model_metrics import ModelMetrics, MetricsSource
 
-# Add parent directory to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from utils import (
+
+from utils.utils_config import (
     load_config,
     get_aws_config,
     get_data_config,
@@ -63,21 +27,13 @@ from utils import (
     get_hyperparameters_config,
     get_validation_config
 )
+from sagemaker_metrics import display_training_job_metrics
 
 
 class YOLOSageMakerPipeline:
-    """
-    Comprehensive SageMaker Pipeline for YOLO model training and registration.
-    """
     
     def __init__(self, config_path: str = "config.yaml"):
-        """
-        Initialize the YOLO SageMaker Pipeline.
-        
-        Args:
-            config_path: Path to the configuration file
-        """
-        # Load configuration
+
         self.config = load_config(config_path)
         
         # Extract configurations
@@ -89,17 +45,15 @@ class YOLOSageMakerPipeline:
         self.runtime_config = self.config.get('runtime', {})
         self.validation_config = get_validation_config(self.config)
         
-        # Setup AWS components
         self._setup_aws_components()
         
-        # Setup pipeline naming with timestamp for uniqueness
+        # setup pipeline naming with timestamp for uniqueness
         self.timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         self._setup_pipeline_names()
         
-        # Setup S3 paths
         self._setup_s3_paths()
         
-        # Initialize pipeline components
+        # initialize pipeline components
         self.pipeline_session = PipelineSession()
         self.estimator = None
         self.pipeline = None
@@ -109,7 +63,11 @@ class YOLOSageMakerPipeline:
         print(f"Model package group: {self.model_package_group_name}")
     
     def _setup_aws_components(self):
-        """Setup AWS session, region, and role."""
+        """
+        "Setup AWS session, region, and role.
+        TODO: this is being reproduced in all other files. maybe create another class for it
+        
+        """
         # Get region
         self.region = self.aws_config.get('region') or boto3.Session().region_name
         
@@ -134,27 +92,21 @@ class YOLOSageMakerPipeline:
         print(f"AWS Setup - Region: {self.region}, Bucket: {self.bucket}, Prefix: {self.prefix}")
     
     def _setup_pipeline_names(self):
-        """Setup consistent naming for all pipeline components."""
         # Get custom names from config or use defaults
         pipeline_config = self.config.get('pipeline', {})
         
-        # Main pipeline name (static, no timestamp)
-        self.pipeline_name = pipeline_config.get('name', "yolo-training-pipeline")
+        self.pipeline_name = pipeline_config.get('name', "yolo-training-pipeline-object-detection")
         
-        # Training step name (static)
-        self.training_step_name = pipeline_config.get('training_step_name', "YOLOTrainingStep")
+        self.training_step_name = pipeline_config.get('training_step_name', "YOLOTrainingStep-ObjectDetection")
         
-        # Model registration step name (static)
-        self.registration_step_name = pipeline_config.get('registration_step_name', "YOLOModelRegistrationStep")
+        self.registration_step_name = pipeline_config.get('registration_step_name', "YOLOModelRegistrationStep-ObjectDetection")
         
-        # Model package group name (static for consistency across runs)
-        self.model_package_group_name = pipeline_config.get('model_package_group_name', "yolo-model-package-group")
+        self.model_package_group_name = pipeline_config.get('model_package_group_name', "yolo-model-package-group-object-detection")
         
-        # Execution name (with timestamp for uniqueness)
-        self.execution_name = f"yolo-pipeline-execution-{self.timestamp}"
+        self.execution_name = f"yolo-pipeline-execution-object-detection-{self.timestamp}"
         
         # CloudWatch log group names
-        self.training_log_group = f"/aws/sagemaker/TrainingJobs/yolo-training"
+        self.training_log_group = f"/aws/sagemaker/TrainingJobs/yolo-training-object-detection"
         
         print(f"Pipeline naming setup completed:")
         print(f"  Pipeline: {self.pipeline_name}")
@@ -164,7 +116,7 @@ class YOLOSageMakerPipeline:
     
     def _setup_s3_paths(self):
         """Setup S3 paths for training data and model outputs."""
-        # Training data path
+        # training data path
         self.s3_training_data = (
             self.data_config.get('s3_dataset_prefix') 
             or self.data_config.get('s3_train_prefix')
@@ -176,10 +128,10 @@ class YOLOSageMakerPipeline:
                 "'data.s3_dataset_prefix' or 'data.s3_train_prefix'"
             )
         
-        # Model output path
+        # model output path
         self.s3_model_output = f"s3://{self.bucket}/{self.prefix}/models/{self.timestamp}"
         
-        # Code output path
+        # code output path
         self.s3_code_output = f"s3://{self.bucket}/{self.prefix}/code/{self.timestamp}"
         
         print(f"S3 Paths configured:")
@@ -188,23 +140,18 @@ class YOLOSageMakerPipeline:
         print(f"  Code output: {self.s3_code_output}")
     
     def create_estimator(self) -> PyTorch:
-        """
-        Create PyTorch estimator for YOLO training.
-        
-        Returns:
-            Configured PyTorch estimator
-        """
-        # Get training configuration
+        # get training configuration
         instance_type = self.training_config.get('instance_type', 'ml.g4dn.xlarge')
         instance_count = self.training_config.get('instance_count', 1)
         volume_size = self.training_config.get('volume_size', 50)
         max_run = self.training_config.get('max_run', 86400)  # 24 hours default
         
-        # Metric definitions for CloudWatch
+        # metric definitions for CloudWatch
+        # TODO: parametrize for keypoint detection
         metric_definitions = [
             {
                 "Name": "yolo:recall",
-                "Regex": r"recall: ([0-9\.]+)"
+                "Regex": r"recall: ([0-9]*\.?[0-9]+)"
             },
             {
                 "Name": "yolo:mAP_0.5",
@@ -228,7 +175,7 @@ class YOLOSageMakerPipeline:
             }
         ]
         
-        # Create PyTorch estimator
+        # create PyTorch estimator
         self.estimator = PyTorch(
             entry_point="yolo_entrypoint.py",
             source_dir="src/sagemaker",
@@ -243,12 +190,11 @@ class YOLOSageMakerPipeline:
             code_location=self.s3_code_output,
             sagemaker_session=self.pipeline_session,
             metric_definitions=metric_definitions,
-            dependencies=["src/sagemaker/requirements.txt"],
-            # Use custom job name for better tracking
+            dependencies=["src/sagemaker/dependencies/requirements.txt"],
             base_job_name=f"yolo-training-{self.timestamp}"
         )
         
-        # Set hyperparameters from config
+        # set hyperparameters from config
         self._set_hyperparameters()
         
         print(f"Created PyTorch estimator:")
@@ -260,6 +206,7 @@ class YOLOSageMakerPipeline:
         return self.estimator
     
     def _set_hyperparameters(self):
+        #TODO: has to parameterize for keypoint detection
         """Set hyperparameters for the training job from configuration."""
         # Build hyperparameters from config
         hyperparams = {
@@ -291,6 +238,8 @@ class YOLOSageMakerPipeline:
             "dropout": self.training_config.get('dropout', 0.1),
             "amp": self.training_config.get('amp', True),
         }
+
+        # Total Loss = 7.5 × Box Loss + 0.5 × Class Loss + 1.5 × DFL Loss
         
         self.estimator.set_hyperparameters(**hyperparams)
         
@@ -304,26 +253,27 @@ class YOLOSageMakerPipeline:
         
         Returns:
             TrainingInput for config.yaml, or None if config not found
+
+        NOTE: We need to upload config.yaml each time we run pipeline as we have may have params changes
         """
-        import boto3
-        
+
         # Check if config.yaml exists locally
         config_path = "config.yaml"
         if not os.path.exists(config_path):
-            print("⚠️ config.yaml not found locally - training will use command-line args only")
+            print("config.yaml not found locally - training will use command-line args only")
             return None
         
         try:
-            # Upload config.yaml to S3 (in a directory for TrainingInput)
+            # upload config.yaml to S3 (in a directory for TrainingInput)
             s3_config_key = f"{self.prefix}/config/{self.timestamp}/config.yaml"
             s3_config_dir = f"s3://{self.bucket}/{self.prefix}/config/{self.timestamp}/"
             
             s3_client = boto3.client('s3', region_name=self.region)
             s3_client.upload_file(config_path, self.bucket, s3_config_key)
             
-            print(f"✅ Uploaded config.yaml to: s3://{self.bucket}/{s3_config_key}")
+            print(f"Uploaded config.yaml to: s3://{self.bucket}/{s3_config_key}")
             
-            # Create TrainingInput for config directory
+            # create TrainingInput for config directory
             config_input = TrainingInput(
                 s3_data=s3_config_dir,
                 distribution="FullyReplicated",
@@ -333,37 +283,31 @@ class YOLOSageMakerPipeline:
             return config_input
             
         except Exception as e:
-            print(f"⚠️ Failed to upload config.yaml to S3: {e}")
+            print(f"Failed to upload config.yaml to S3: {e}")
             print("Training will use command-line args only")
             return None
     
     def create_training_step(self) -> TrainingStep:
-        """
-        Create the training step for the pipeline.
-        
-        Returns:
-            Configured training step
-        """
         if self.estimator is None:
             raise ValueError("Estimator must be created first using create_estimator()")
         
-        # Prepare training inputs
+        # prepare training inputs
         training_input = TrainingInput(
             s3_data=self.s3_training_data,
             distribution="FullyReplicated",
             s3_data_type="S3Prefix"
         )
         
-        # Upload config.yaml to S3 and create config input
+        # upload config.yaml to S3 and create config input
         config_input = self._prepare_config_input()
         
-        # Configure caching based on config
+        # configure caching based on config
         cache_config = None
         if self.pipeline_config.get('enable_caching', False):
             from sagemaker.workflow.pipeline_context import PipelineSession
             cache_config = CacheConfig(enable_caching=True, expire_after="PT1H")  # 1 hour cache
         
-        # Create training step with both data and config inputs
+        # create training step with both data and config inputs
         inputs = {"training": training_input}
         if config_input:
             inputs["config"] = config_input
@@ -378,7 +322,7 @@ class YOLOSageMakerPipeline:
         print(f"Created training step: {self.training_step_name}")
         print(f"  Training data input: {self.s3_training_data}")
         if config_input:
-            print(f"  Config input: Available (config.yaml will be prioritized)")
+            print(f"  Config input: Available")
         else:
             print(f"  Config input: Not available (using command-line args)")
         
@@ -394,22 +338,22 @@ class YOLOSageMakerPipeline:
         Returns:
             Configured model registration step
         """
-        # Determine approval status based on config
+        # determine approval status based on config
         auto_approve = self.pipeline_config.get('auto_approve_models', False)
         approval_status = "Approved" if auto_approve else "PendingManualApproval"
         
-        # Create model registration step
+        # create model registration step
         registration_step = RegisterModel(
             name=self.registration_step_name,
             estimator=self.estimator,
             model_data=training_step.properties.ModelArtifacts.S3ModelArtifacts,
             content_types=["application/x-onnx", "application/json"],
             response_types=["application/json"],
-            inference_instances=["ml.m5.large", "ml.m5.xlarge", "ml.g4dn.xlarge"],
-            transform_instances=["ml.m5.large", "ml.m5.xlarge"],
+            inference_instances=["ml.m5.large", "ml.m5.xlarge", "ml.g4dn.xlarge"], #TODO: need to check this
+            transform_instances=["ml.m5.large", "ml.m5.xlarge"], #TODO: need to check this
             model_package_group_name=self.model_package_group_name,
             approval_status=approval_status,
-            model_metrics=self._create_model_metrics()  # YOLO validation metrics
+            model_metrics=self._create_model_metrics()
         )
         
         print(f"Created model registration step: {self.registration_step_name}")
@@ -440,6 +384,7 @@ class YOLOSageMakerPipeline:
             )
         )
         
+        # TODO: can we parametrize for keypoint detection?
         print("Model metrics configured:")
         print("  - mAP@0.5 (Primary detection metric)")
         print("  - mAP@0.5:0.95 (COCO evaluation metric)")
@@ -450,27 +395,20 @@ class YOLOSageMakerPipeline:
         return model_statistics
     
     def create_pipeline(self) -> Pipeline:
-        """
-        Create the complete SageMaker pipeline.
-        
-        Returns:
-            Configured SageMaker pipeline
-        """
-        # Create estimator
+        # create estimator
         self.create_estimator()
         
-        # Create training step
+        # create training step
         training_step = self.create_training_step()
         
-        # Create model registration step
+        # create model registration step
         registration_step = self.create_model_registration_step(training_step)
         
-        # Create pipeline
+        # create pipeline
         self.pipeline = Pipeline(
             name=self.pipeline_name,
             steps=[training_step, registration_step],
             sagemaker_session=self.pipeline_session,
-            # Pipeline parameters could be added here for dynamic configuration
         )
         
         print(f"Created complete pipeline: {self.pipeline_name}")
@@ -492,7 +430,7 @@ class YOLOSageMakerPipeline:
         
         print(f"Upserting pipeline: {self.pipeline_name}")
         
-        # Upsert (create or update) the pipeline
+        # upsert (create or update) the pipeline
         response = self.pipeline.upsert(role_arn=self.role_arn)
         
         print(f"Pipeline upserted successfully!")
@@ -501,34 +439,24 @@ class YOLOSageMakerPipeline:
         return response
     
     def start_execution(self, execution_display_name: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Start pipeline execution.
-        
-        Args:
-            execution_display_name: Optional display name for the execution
-            
-        Returns:
-            Execution response from SageMaker
-        """
+
         if self.pipeline is None:
             raise ValueError("Pipeline must be created first using create_pipeline()")
         
-        # Set default execution name if not provided
+        # set default execution name if not provided
         if execution_display_name is None:
             execution_display_name = self.execution_name
         
         print(f"Starting pipeline execution: {execution_display_name}")
         
-        # Start execution
+        # start execution
         execution = self.pipeline.start(
             execution_display_name=execution_display_name,
-            # execution_description could be added here
+            execution_description="YOLO model training execution"
         )
         
         print(f"Pipeline execution started successfully!")
         print(f"  Execution ARN: {execution.arn}")
-        
-        # Print useful information for monitoring
         print(f"\nMonitoring Information:")
         print(f"  Pipeline Name: {self.pipeline_name}")
         print(f"  Execution Name: {execution_display_name}")
@@ -551,13 +479,13 @@ class YOLOSageMakerPipeline:
         print("Starting YOLO SageMaker Pipeline Workflow")
         print("="*60)
         
-        # Create pipeline
+        # create pipeline
         self.create_pipeline()
         
-        # Upsert pipeline
+        # upsert pipeline
         self.upsert_pipeline()
         
-        # Start execution
+        # start execution
         execution = self.start_execution()
         
         if wait_for_completion:
@@ -565,22 +493,30 @@ class YOLOSageMakerPipeline:
             print(f"You can monitor progress at:")
             print(f"  SageMaker Console: https://{self.region}.console.aws.amazon.com/sagemaker/home?region={self.region}#/pipelines/{self.pipeline_name}/executions/{self.execution_name}")
             
-            # Monitor execution with detailed logging
+            # monitor execution with detailed logging
             self._monitor_execution_with_logs(execution)
             
             print(f"Pipeline execution completed!")
             
-            # Get final execution status
+            # get final execution status
             status = execution.describe()
             final_status = status.get('PipelineExecutionStatus', 'Unknown')
             print(f"Final status: {final_status}")
             
-            # Show step results
+            # show step results
             self._print_execution_summary(execution)
             
-            # Extract and display training metrics if enabled
-            if self.runtime_config.get('display_metrics', True):
+            # get final execution status
+            status = execution.describe()
+            execution_status = status.get('PipelineExecutionStatus', 'Unknown')
+            
+            # extract and display training metrics if enabled and execution succeeded
+            if self.runtime_config.get('display_metrics', True) and execution_status == 'Succeeded':
                 self._display_training_metrics(execution)
+            elif execution_status == 'Failed':
+                print(f"\nPipeline execution failed. Skipping metrics extraction.")
+                print(f"Extracting training job logs to diagnose the failure...")
+                self._display_training_failure_logs(execution)
         else:
             print(f"\nPipeline execution started. Monitor progress in SageMaker console.")
             print(f"  SageMaker Console: https://{self.region}.console.aws.amazon.com/sagemaker/home?region={self.region}#/pipelines/{self.pipeline_name}/executions/{self.execution_name}")
@@ -597,14 +533,7 @@ class YOLOSageMakerPipeline:
         }
     
     def _monitor_execution_with_logs(self, execution):
-        """
-        Monitor pipeline execution with detailed progress logging.
-        
-        Args:
-            execution: Pipeline execution object
-        """
-        import time
-        
+
         print("="*50)
         print("PIPELINE EXECUTION MONITORING")
         print("="*50)
@@ -614,17 +543,17 @@ class YOLOSageMakerPipeline:
         
         while True:
             try:
-                # Get current execution status
+                # get current execution status
                 current_status = execution.describe()
                 execution_status = current_status.get('PipelineExecutionStatus', 'Unknown')
                 
-                # Print execution status change
+                # print execution status change
                 if execution_status != last_status:
                     timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                     print(f"[{timestamp}] Pipeline Status: {execution_status}")
                     last_status = execution_status
                 
-                # Get step statuses
+                # get step statuses
                 try:
                     steps = execution.list_steps()
                     for step in steps:
@@ -649,12 +578,12 @@ class YOLOSageMakerPipeline:
                 except Exception as e:
                     print(f"Warning: Could not get step details: {e}")
                 
-                # Check if execution is complete
+                # check if execution is complete
                 if execution_status in ['Succeeded', 'Failed', 'Stopped']:
                     break
                     
-                # Wait before next check
-                time.sleep(30)  # Check every 30 seconds
+                # wait before next check
+                time.sleep(30)  # check every 30 seconds
                 
             except KeyboardInterrupt:
                 print(f"\nMonitoring interrupted by user. Pipeline continues running.")
@@ -667,18 +596,12 @@ class YOLOSageMakerPipeline:
         print("="*50)
     
     def _print_execution_summary(self, execution):
-        """
-        Print a summary of the pipeline execution results.
-        
-        Args:
-            execution: Pipeline execution object
-        """
         print("\n" + "="*50)
         print("PIPELINE EXECUTION SUMMARY")
         print("="*50)
         
         try:
-            # Get execution details
+            # get execution details
             status = execution.describe()
             execution_status = status.get('PipelineExecutionStatus', 'Unknown')
             start_time = status.get('CreationTime', 'Unknown')
@@ -688,7 +611,7 @@ class YOLOSageMakerPipeline:
             print(f"Start Time: {start_time}")
             print(f"End Time: {end_time}")
             
-            # Get step details
+            # get step details
             steps = execution.list_steps()
             print(f"\nStep Results:")
             print("-" * 30)
@@ -704,7 +627,7 @@ class YOLOSageMakerPipeline:
                 print(f"  Start: {step_start}")
                 print(f"  End: {step_end}")
                 
-                # Show training job details if available
+                # show training job details if available
                 metadata = step.get('Metadata', {})
                 if 'TrainingJob' in metadata:
                     training_job = metadata['TrainingJob']
@@ -713,7 +636,7 @@ class YOLOSageMakerPipeline:
                         job_name = training_job_arn.split('/')[-1]
                         print(f"  Training Job: {job_name}")
                 
-                # Show model registration details if available
+                # show model registration details if available
                 if 'RegisterModel' in metadata:
                     model_package_arn = metadata['RegisterModel'].get('Arn', '')
                     if model_package_arn:
@@ -726,24 +649,104 @@ class YOLOSageMakerPipeline:
         
         print("="*50)
     
-    def _display_training_metrics(self, execution):
+    def _display_training_failure_logs(self, execution):
         """
-        Extract and display training metrics from the completed pipeline.
-        
-        Args:
-            execution: Pipeline execution object
+        Extract and display training job logs when pipeline execution fails.
+        This helps diagnose why the training step failed.
         """
         try:
-            # Import the metrics functionality
-            import sys
-            sys.path.append(os.path.join(os.path.dirname(__file__)))
-            from sagemaker_metrics import display_training_job_metrics
+            print("\n" + "="*60)
+            print("TRAINING FAILURE DIAGNOSIS")
+            print("="*60)
             
+            # get the training job name from the execution steps
+            training_job_name = None
+            try:
+                steps = execution.list_steps()
+                for step in steps:
+                    if 'train' in step.get('StepName', '').lower():
+                        metadata = step.get('Metadata', {})
+                        if 'TrainingJob' in metadata:
+                            training_job_arn = metadata['TrainingJob'].get('Arn', '')
+                            if training_job_arn:
+                                training_job_name = training_job_arn.split('/')[-1]
+                                break
+            except Exception as e:
+                print(f"Warning: Could not extract training job name from pipeline: {e}")
+            
+            if training_job_name:
+                print(f"Found failed training job: {training_job_name}")
+                print("Fetching CloudWatch logs to diagnose failure...")
+                print("-" * 60)
+                
+                # Get CloudWatch logs
+                try:
+                    import boto3
+                    logs_client = boto3.client('logs', region_name=self.region)
+                    
+                    # Get the most recent log stream
+                    log_group = f"/aws/sagemaker/TrainingJobs/{training_job_name}"
+                    
+                    try:
+                        # Get log streams, sorted by last event time
+                        response = logs_client.describe_log_streams(
+                            logGroupName=log_group,
+                            orderBy='LastEventTime',
+                            descending=True,
+                            limit=1
+                        )
+                        
+                        if response['logStreams']:
+                            latest_stream = response['logStreams'][0]['logStreamName']
+                            print(f"Latest log stream: {latest_stream}")
+                            
+                            # Get the last 50 log events (usually contains the error)
+                            log_events = logs_client.get_log_events(
+                                logGroupName=log_group,
+                                logStreamName=latest_stream,
+                                startFromHead=False,
+                                limit=50
+                            )
+                            
+                            print(f"\nLast 50 log events from training job:")
+                            print("-" * 60)
+                            
+                            for event in reversed(log_events['events']):
+                                timestamp = event['timestamp']
+                                message = event['message']
+                                print(f"[{timestamp}] {message}")
+                            
+                            print("-" * 60)
+                            print(f"Full logs available at:")
+                            print(f"  CloudWatch Console: https://{self.region}.console.aws.amazon.com/cloudwatch/home?region={self.region}#logsV2:log-groups/log-group/%2Faws%2Fsagemaker%2FTrainingJobs/log-events/{training_job_name}")
+                            
+                        else:
+                            print(f"No log streams found for training job: {training_job_name}")
+                            
+                    except logs_client.exceptions.ResourceNotFoundException:
+                        print(f"Log group not found: {log_group}")
+                        print("Training job may have failed before logs were created.")
+                        
+                except ImportError:
+                    print("boto3 not available. Cannot fetch CloudWatch logs.")
+                except Exception as e:
+                    print(f"Error fetching CloudWatch logs: {e}")
+                
+            else:
+                print("Could not find training job name from pipeline execution.")
+                print("Check the SageMaker console for training job details.")
+        
+        except Exception as e:
+            print(f"Error displaying training failure logs: {e}")
+            print("Check the SageMaker console manually for training job details.")
+
+    def _display_training_metrics(self, execution):
+        try:
             print("\n" + "="*60)
             print("EXTRACTING TRAINING METRICS")
             print("="*60)
             
-            # Get the training job name from the execution steps
+            # get the training job name from the execution steps
             training_job_name = None
             try:
                 steps = execution.list_steps()
@@ -762,10 +765,9 @@ class YOLOSageMakerPipeline:
                 print(f"Found training job: {training_job_name}")
                 print("Extracting metrics...")
                 print("-" * 60)
-                
-                # Use the sagemaker_metrics functionality
+
                 display_training_job_metrics(training_job_name)
-                
+
             else:
                 print("Could not find training job name from pipeline execution.")
                 print("You can manually check metrics using:")
@@ -782,26 +784,18 @@ class YOLOSageMakerPipeline:
 
 
 def run_yolo_pipeline(config_path: str = "config.yaml") -> Dict[str, Any]:
-    """
-    Simplified function to run YOLO pipeline with configuration.
-    
-    Args:
-        config_path: Path to configuration file
-        
-    Returns:
-        Pipeline execution results
-    """
+
     print(f"Loading configuration from: {config_path}")
     pipeline = YOLOSageMakerPipeline(config_path=config_path)
     
-    # Get runtime configuration for execution behavior
+    # get runtime configuration for execution behavior
     runtime_config = pipeline.config.get('runtime', {})
     pipeline_config = pipeline.config.get('pipeline', {})
     
-    # Check if this is a dry run (from config)
+    # check if this is a dry run
     dry_run = pipeline_config.get('dry_run', False)
     
-    # Check if we should wait for completion (from config)
+    # check if we should wait for completion
     wait_for_completion = runtime_config.get('wait_for_completion', False)
     
     if dry_run:
@@ -816,16 +810,13 @@ def run_yolo_pipeline(config_path: str = "config.yaml") -> Dict[str, Any]:
             "status": "dry_run_completed"
         }
     else:
-        # Run complete pipeline
+        # run complete pipeline
         result = pipeline.run_pipeline(wait_for_completion=wait_for_completion)
         return result
 
 
 def main():
-    """
-    Main function to run the YOLO SageMaker Pipeline.
-    Configuration-driven execution using config.yaml settings.
-    """
+
     config_path = os.environ.get("YOLO_CONFIG_PATH", "config.yaml")
     
     try:
@@ -844,21 +835,34 @@ if __name__ == "__main__":
     main()
     
     
-# Example:
-"""
-# Simple usage - just run with default config
-from src.sagemaker.sagemaker_pipeline import run_yolo_pipeline
-result = run_yolo_pipeline()
+    # Example:
+    """
+    This script creates and executes a complete SageMaker pipeline that:
+    1. Trains a YOLO model using the configured dataset
+    2. Registers the trained model in the SageMaker Model Registry
+    3. Can be run standalone with proper configuration
 
-# Advanced usage - create pipeline object for more control
-from src.sagemaker.sagemaker_pipeline import YOLOSageMakerPipeline
+    The pipeline integrates with the existing sagemaker_trainer.py and yolo_entrypoint.py
+    components for a complete end-to-end training workflow.
 
-pipeline = YOLOSageMakerPipeline("config.yaml")
-pipeline.create_pipeline()
-pipeline.upsert_pipeline()
-execution = pipeline.start_execution()
+    Usage Examples:
 
-# Display metrics for a specific training job
-from src.sagemaker.sagemaker_metrics import display_training_job_metrics
-display_training_job_metrics("your-training-job-name")
-"""
+    1. Run directly (uses config.yaml):
+    python src/sagemaker/sagemaker_pipeline.py
+
+    2. Use with custom config path (via environment variable):
+    export YOLO_CONFIG_PATH=/path/to/custom/config.yaml
+    python src/sagemaker/sagemaker_pipeline.py
+
+    # Simple usage - just run with default config
+    from src.sagemaker.sagemaker_pipeline import run_yolo_pipeline
+    result = run_yolo_pipeline()
+
+    # Advanced usage - create pipeline object for more control
+    from src.sagemaker.sagemaker_pipeline import YOLOSageMakerPipeline
+
+    pipeline = YOLOSageMakerPipeline("config.yaml")
+    pipeline.create_pipeline()
+    pipeline.upsert_pipeline()
+    execution = pipeline.start_execution()
+    """
