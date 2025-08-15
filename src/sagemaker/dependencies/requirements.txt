@@ -1,0 +1,9 @@
+ultralytics
+pandas
+boto3
+opencv-python
+pyyaml
+rich
+matplotlib
+onnx
+onnxruntime
