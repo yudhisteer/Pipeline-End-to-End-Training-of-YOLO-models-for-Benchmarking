@@ -1,18 +1,17 @@
 """
-SageMaker data management utilities for plastic bag detection model.
+SageMaker data management utilities for YOLO model.
 Handles S3 uploads, data preparation, and S3 path management.
 """
 
 import sagemaker
 import boto3
 import os
-import sys
 import argparse
 from typing import Dict, Optional, Tuple, Any
 from botocore.exceptions import ClientError
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from utils import (
+
+from utils.utils_config import (
     load_config,
     get_data_config,
     get_aws_config,
@@ -21,7 +20,6 @@ from utils import (
 
 
 class SageMakerDataManager:
-    """Handles S3 data operations for SageMaker training."""
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
@@ -123,41 +121,30 @@ class SageMakerDataManager:
             where s3_paths is a dict with 'train' and 'validation' keys pointing to S3 prefixes
         """
         data_config = get_data_config(self.config)
-        # Check for complete YOLO dataset (preferred) or fallback to separate train/val
+        # Check for complete YOLO dataset
         expected_dataset_s3 = (
             data_config.get('s3_dataset_prefix')
             or f"s3://{self.bucket}/{self.prefix}/yolo_dataset/"
         )
-        expected_train_s3 = (
-            data_config.get('s3_train_prefix')
-            or expected_dataset_s3
-        )
-        expected_validation_s3 = (
-            data_config.get('s3_val_prefix')
-            or data_config.get('s3_validation_prefix')
-            or expected_dataset_s3
-        )
         
-        # Check if complete dataset exists (preferred - contains data.yaml)
+
         dataset_exists = self._s3_object_exists(os.path.join(expected_dataset_s3, 'data.yaml'))
         
         if dataset_exists:
-            # Complete dataset exists
             train_exists = True
             validation_exists = True
             print(f"S3 data check results:")
             print(f"  Complete YOLO dataset exists: {dataset_exists} ({expected_dataset_s3})")
         else:
-            # Fallback: check separate train/val directories
-            train_exists = self._s3_object_exists(expected_train_s3)
-            validation_exists = self._s3_object_exists(expected_validation_s3)
+            # No dataset found
+            train_exists = False
+            validation_exists = False
             print(f"S3 data check results:")
-            print(f"  Training prefix exists: {train_exists} ({expected_train_s3})")
-            print(f"  Validation prefix exists: {validation_exists} ({expected_validation_s3})")
+            print(f"  Complete YOLO dataset not found at: {expected_dataset_s3}")
         
         s3_paths = {
-            'train': expected_dataset_s3 if dataset_exists else expected_train_s3,
-            'validation': expected_dataset_s3 if dataset_exists else expected_validation_s3,
+            'train': expected_dataset_s3,
+            'validation': expected_dataset_s3,
         }
         
         return train_exists, validation_exists, s3_paths
@@ -174,8 +161,6 @@ class SageMakerDataManager:
         """
         # check if data already exists in S3
         train_exists, validation_exists, existing_s3_paths = self.check_data_in_s3()
-        
-        # determine local directories - can be overridden via config
         data_config = get_data_config(self.config)
         
         # For YOLO, we need to upload the entire dataset directory that contains data.yaml
@@ -193,15 +178,13 @@ class SageMakerDataManager:
         if not os.path.isfile(data_yaml_path):
             raise FileNotFoundError(f"YOLO data.yaml file not found: {data_yaml_path}")
         
-        # expected s3 prefixes - now pointing to complete dataset
+        # expected s3 prefix for complete dataset
         expected_dataset_s3 = (
             data_config.get('s3_dataset_prefix')
             or f"s3://{self.bucket}/{self.prefix}/yolo_dataset/"
         )
-        expected_train_s3 = expected_dataset_s3  # For backward compatibility
-        expected_validation_s3 = expected_dataset_s3  # For backward compatibility
         
-        # Check if complete dataset exists (contains data.yaml)
+        # Check if complete dataset exists
         dataset_exists = self._s3_object_exists(os.path.join(expected_dataset_s3, 'data.yaml'))
         
         if not force_upload and dataset_exists:
@@ -236,7 +219,6 @@ def main():
     
     args = parser.parse_args()
     
-    # load config file
     print(f"Loading configuration from: {args.config}")
     config = load_config(args.config)
     
@@ -269,3 +251,24 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    # Example usage:
+    """
+    # Show help message with all available options
+    python src/sagemaker/sagemaker_data_manager.py --help
+
+    # Check if data exists in S3 then upload (uses default config.yaml)
+    python src/sagemaker/sagemaker_data_manager.py
+    
+    # Check if data exists in S3, then force upload (overwrites existing data)
+    python src/sagemaker/sagemaker_data_manager.py --config config.yaml --force --check-only
+    
+    # Force upload data to S3 (overwrites existing data)
+    python src/sagemaker/sagemaker_data_manager.py --config config.yaml --force
+    
+    # Only check if data exists in S3 (no upload)
+    python src/sagemaker/sagemaker_data_manager.py --config config.yaml --check-only
+    
+    # Check if data exists, upload only if missing (default behavior)
+    python src/sagemaker/sagemaker_data_manager.py --config config.yaml
+    """
