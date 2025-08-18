@@ -281,6 +281,12 @@ def load_inference_config():
         }
 
 
+def load_ground_truth_config():
+    """Load ground truth configuration from config.yaml with fallbacks."""
+    config = load_config()
+    return config.get('ground_truth', {})
+
+
 def parse_training_args(config: Dict[str, Any] = None):
     """Parse training arguments with config.yaml taking priority."""
     parser = argparse.ArgumentParser(description='YOLO Training for SageMaker')
