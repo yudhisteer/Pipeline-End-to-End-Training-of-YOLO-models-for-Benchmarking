@@ -85,7 +85,7 @@ class SageMakerDeployment:
             role=self.role,
             framework_version="2.0",
             py_version="py310",
-            entry_point="inference.py",
+            entry_point="src/sagemaker/inference_aws.py",
             source_dir="src/sagemaker",
             dependencies=["src/sagemaker/dependencies/requirements.txt"],
             sagemaker_session=self.sess,
@@ -93,7 +93,10 @@ class SageMakerDeployment:
                 'SAGEMAKER_MODEL_SERVER_TIMEOUT': '3600',
                 'SAGEMAKER_MODEL_SERVER_WORKERS': '1',
                 'MMS_DEFAULT_RESPONSE_TIMEOUT': '900',
-                'SAGEMAKER_ENABLE_CLOUDWATCH_METRICS': 'true'
+                'SAGEMAKER_ENABLE_CLOUDWATCH_METRICS': 'true',
+                'MMS_MAX_REQUEST_SIZE': '100000000',
+                'MMS_MAX_RESPONSE_SIZE': '100000000',
+                'PYTHONUNBUFFERED': '1'
             }
         )
         
