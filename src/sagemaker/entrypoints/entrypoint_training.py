@@ -1,43 +1,42 @@
-#!/usr/bin/env python3
 """
 Simplified YOLO training entry point for SageMaker.
 Handles config.yaml with fallback to command-line arguments.
 """
 
 import os
-import sys
 from ultralytics import YOLO
 
-from utils import (
+from utils.utils_metrics import (
     generate_model_metrics, 
     send_metrics_to_cloudwatch, 
     save_metrics_for_pipeline,
-    load_training_config,
-    parse_training_args
 )
+from utils.utils_config import load_training_config
 
 
 def main():
-    """Main training function for SageMaker."""
+
     print("Starting YOLO Training...")
     
-    # Load configuration and parse arguments
+    # Load configuration
     config = load_training_config()
-    args = parse_training_args(config)
     
     # Get SageMaker paths
     input_data_dir = os.environ.get("SM_CHANNEL_TRAINING", "/opt/ml/input/data/training")
     model_dir = os.environ.get("SM_MODEL_DIR", "/opt/ml/model")
     
+    # Get model name from config
+    model_name = config.get('training', {}).get('model_name', 'yolo11n.pt') if config else 'yolo11n.pt'
+    
     print(f"Training data: {input_data_dir}")
     print(f"Model output: {model_dir}")
-    print(f"Model: {args.model_name} | Epochs: {args.epochs} | Batch: {args.batch_size}")
+    print(f"Model: {model_name}")
     
     # Find data.yaml
     data_yaml_path = os.path.join(input_data_dir, "data.yaml")
     if not os.path.exists(data_yaml_path):
         # Look in subdirectories
-        for subdir in ["yolo_dataset", "train"]:
+        for subdir in ["yolo-dataset", "train"]:
             alt_path = os.path.join(input_data_dir, subdir, "data.yaml")
             if os.path.exists(alt_path):
                 data_yaml_path = alt_path
@@ -48,42 +47,29 @@ def main():
     print(f"Dataset config: {data_yaml_path}")
     
     # Initialize and train model
-    model = YOLO(args.model_name)
+    model = YOLO(model_name)
     print("Starting training...")
+
+    # Build hyperparameters directly from config
+    hyperparams = {
+        "data": data_yaml_path,
+        "project": model_dir,
+        "name": "",
+        "exist_ok": True
+    }
     
-    results = model.train(
-        data=data_yaml_path,
-        imgsz=args.image_size,
-        epochs=args.epochs,
-        batch=args.batch_size,
-        lr0=args.lr0,
-        lrf=args.lrf,
-        momentum=args.momentum,
-        weight_decay=args.weight_decay,
-        warmup_epochs=args.warmup_epochs,
-        cos_lr=args.cos_lr,
-        optimizer=args.optimizer,
-        hsv_h=args.hsv_h,
-        hsv_s=args.hsv_s,
-        hsv_v=args.hsv_v,
-        degrees=args.degrees,
-        translate=args.translate,
-        scale=args.scale,
-        fliplr=args.fliplr,
-        mosaic=args.mosaic,
-        mixup=args.mixup,
-        box=args.box,
-        cls=args.cls,
-        dfl=args.dfl,
-        label_smoothing=args.label_smoothing,
-        patience=args.patience,
-        dropout=args.dropout,
-        amp=args.amp,
-        project=model_dir,
-        name="",
-        exist_ok=True
-    )
+    # Read training.hyperparams directly from config
+    training_hyperparams = config['training']['hyperparams']
+        
+    # Add all hyperparams from config directly
+    hyperparams.update(training_hyperparams)
+
+    print("Hyperparameters for training:")
+    for key, value in hyperparams.items():
+        print(f"  {key}: {value}")
     
+    # Train model
+    results = model.train(**hyperparams)
     print("Training completed!!!")
     
     # Generate metrics and export model
