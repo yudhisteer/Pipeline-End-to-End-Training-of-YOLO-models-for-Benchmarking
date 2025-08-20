@@ -102,7 +102,7 @@ def get_hyperparameters_config(config: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Hyperparameters configuration dictionary
     """
-    return config.get('hyperparameters', {})
+    return config.get('training', {}).get('hyperparams', {})
 
 
 def get_tuning_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -285,61 +285,3 @@ def load_ground_truth_config():
     """Load ground truth configuration from config.yaml with fallbacks."""
     config = load_config()
     return config.get('ground_truth', {})
-
-
-def parse_training_args(config: Dict[str, Any] = None):
-    """Parse training arguments with config.yaml taking priority."""
-    parser = argparse.ArgumentParser(description='YOLO Training for SageMaker')
-    
-    # Get defaults from config or use hardcoded defaults
-    def get_default(config_section, config_key, fallback):
-        if config and config_section in config and config_key in config[config_section]:
-            return config[config_section][config_key]
-        return fallback
-    
-    # Core training parameters
-    parser.add_argument('--model_name', type=str, 
-                       default=get_default('hyperparameters', 'model_name', 'yolo11n.pt'))
-    parser.add_argument('--epochs', type=int, 
-                       default=get_default('training', 'epochs', 100))
-    parser.add_argument('--batch_size', type=int, 
-                       default=get_default('training', 'batch_size', 16))
-    parser.add_argument('--image_size', type=int, 
-                       default=get_default('training', 'image_size', 640))
-    
-    # Learning parameters
-    parser.add_argument('--lr0', type=float, 
-                       default=get_default('training', 'lr0', 0.01))
-    parser.add_argument('--optimizer', type=str, 
-                       default=get_default('training', 'optimizer', 'AdamW'))
-    
-    # Add other parameters with reasonable defaults
-    parser.add_argument('--lrf', type=float, default=get_default('training', 'lrf', 0.1))
-    parser.add_argument('--momentum', type=float, default=get_default('training', 'momentum', 0.937))
-    parser.add_argument('--weight_decay', type=float, default=get_default('training', 'weight_decay', 0.0005))
-    parser.add_argument('--warmup_epochs', type=float, default=get_default('training', 'warmup_epochs', 3.0))
-    parser.add_argument('--cos_lr', type=lambda x: x.lower() == 'true', default=get_default('training', 'cos_lr', True))
-    parser.add_argument('--patience', type=int, default=get_default('training', 'patience', 50))
-    parser.add_argument('--amp', type=lambda x: x.lower() == 'true', default=get_default('training', 'amp', True))
-    
-    # Augmentation parameters
-    parser.add_argument('--hsv_h', type=float, default=get_default('training', 'hsv_h', 0.015))
-    parser.add_argument('--hsv_s', type=float, default=get_default('training', 'hsv_s', 0.7))
-    parser.add_argument('--hsv_v', type=float, default=get_default('training', 'hsv_v', 0.4))
-    parser.add_argument('--degrees', type=float, default=get_default('training', 'degrees', 10.0))
-    parser.add_argument('--translate', type=float, default=get_default('training', 'translate', 0.1))
-    parser.add_argument('--scale', type=float, default=get_default('training', 'scale', 0.5))
-    parser.add_argument('--fliplr', type=float, default=get_default('training', 'fliplr', 0.5))
-    parser.add_argument('--mosaic', type=float, default=get_default('training', 'mosaic', 1.0))
-    parser.add_argument('--mixup', type=float, default=get_default('training', 'mixup', 0.1))
-    
-    # Loss weights
-    parser.add_argument('--box', type=float, default=get_default('training', 'box', 7.5))
-    parser.add_argument('--cls', type=float, default=get_default('training', 'cls', 0.5))
-    parser.add_argument('--dfl', type=float, default=get_default('training', 'dfl', 1.5))
-    parser.add_argument('--label_smoothing', type=float, default=get_default('training', 'label_smoothing', 0.1))
-    parser.add_argument('--dropout', type=float, default=get_default('training', 'dropout', 0.1))
-    
-    return parser.parse_args()
-
-
