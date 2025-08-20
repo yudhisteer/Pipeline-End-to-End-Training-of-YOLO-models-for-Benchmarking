@@ -209,3 +209,91 @@ def get_categories(json_file: str) -> list:
         labels = [item["label"] for item in record["labels"]]
 
     return labels
+
+
+def get_s3_dataset_info(s3_bucket: str, base_prefix: str) -> dict:
+    """
+    Get comprehensive dataset information from S3 including images, labels, and structure.
+    
+    Input:
+        s3_bucket: S3 bucket name
+        base_prefix: Base S3 prefix for the dataset
+        
+    Returns:
+        Dictionary containing dataset information:
+        {
+            'status': str,
+            'output_s3_path': str,
+            'train_images': int,
+            'val_images': int,
+            'train_labels': int,
+            'val_labels': int,
+            'has_data_yaml': bool,
+            'has_manifest': bool,
+            'total_files': int,
+            'train_prefix': str,
+            'val_prefix': str,
+            'bucket': str
+        }
+    """
+    try:
+        s3_client = boto3.client('s3')
+        
+        # Check if dataset exists
+        response = s3_client.list_objects_v2(
+            Bucket=s3_bucket,
+            Prefix=base_prefix,
+            MaxKeys=1000
+        )
+        
+        if 'Contents' not in response:
+            return {
+                'status': 'not_found', 
+                'message': 'Dataset not found',
+                'bucket': s3_bucket,
+                'base_prefix': base_prefix
+            }
+        
+        # Analyze structure
+        files = [obj['Key'] for obj in response['Contents']]
+        
+        # Count files by type
+        train_images = [f for f in files if f.endswith(('.jpg', '.jpeg', '.png')) and 'train/images' in f]
+        val_images = [f for f in files if f.endswith(('.jpg', '.jpeg', '.png')) and 'val/images' in f]
+        train_labels = [f for f in files if f.endswith('.txt') and 'train/labels' in f]
+        val_labels = [f for f in files if f.endswith('.txt') and 'val/labels' in f]
+        
+        # Check for required files
+        has_data_yaml = any(f.endswith('data.yaml') for f in files)
+        has_manifest = any(f.endswith('output.manifest') for f in files)
+        
+        # Define train and val prefixes
+        train_prefix = f"{base_prefix}/train"
+        val_prefix = f"{base_prefix}/val"
+        
+        info = {
+            'status': 'found',
+            'output_s3_path': f"s3://{s3_bucket}/{base_prefix}",
+            'train_images': len(train_images),
+            'val_images': len(val_images),
+            'train_labels': len(train_labels),
+            'val_labels': len(val_labels),
+            'has_data_yaml': has_data_yaml,
+            'has_manifest': has_manifest,
+            'total_files': len(files),
+            'train_prefix': train_prefix,
+            'val_prefix': val_prefix,
+            'bucket': s3_bucket,
+            'base_prefix': base_prefix
+        }
+        
+        return info
+        
+    except Exception as e:
+        print(f"Error getting S3 dataset info: {e}")
+        return {
+            'status': 'error',
+            'message': str(e),
+            'bucket': s3_bucket,
+            'base_prefix': base_prefix
+        }
