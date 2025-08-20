@@ -296,7 +296,7 @@ This is an example of the output:
 
 
 
-
+![Visualize YOLO Annotations](../assets/Screenshot%202025-08-18%20150459.png)
 
 
 Note that it is important we get the order of the labels. It should match the order we used while creating the Ground Truth labeling job. If we don't get the order right, the labels will be assigned incorrectly. We can get this from `data.json` under the path: `s3://ground-truth-data-labeling/bounding_box_v1/ground_truth_annots/yolo-bbox/annotation-tool/data.json`.
