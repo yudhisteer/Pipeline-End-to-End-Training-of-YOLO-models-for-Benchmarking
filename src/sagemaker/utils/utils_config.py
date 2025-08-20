@@ -211,7 +211,8 @@ def load_inference_config():
             'confidence_threshold': inference_config.get('confidence_threshold', 0.25),
             'iou_threshold': inference_config.get('iou_threshold', 0.45),
             'output_dir': inference_config.get('output_dir', './output'),
-            'dataset_dir': data_config.get('dataset_dir', 'dataset/yolo_dataset'),
+            'dataset_dir': data_config.get('dataset_dir', 'dataset/yolo-dataset'),
+            'test_image_path': inference_config.get('test', {}).get('image_path', 'val/images/000000000885.jpg'),
             'max_image_size': inference_config.get('max_image_size', 4096),
             'supported_formats': inference_config.get('supported_formats', 
                                                     ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp']),
@@ -252,7 +253,7 @@ def load_inference_config():
             'confidence_threshold': 0.25,
             'iou_threshold': 0.45,
             'output_dir': './output',
-            'dataset_dir': 'dataset/yolo_dataset',
+            'dataset_dir': 'dataset/yolo-dataset',
             'max_image_size': 4096,
             'supported_formats': ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'],
             'visualization': {
