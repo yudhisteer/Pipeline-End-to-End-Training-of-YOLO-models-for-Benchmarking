@@ -12,6 +12,10 @@ import argparse
 import tarfile
 from typing import Dict, Any, Tuple, List
 from urllib.parse import urlparse
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
 
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.console import Console
@@ -41,8 +45,20 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
     
     try:
+        # Load .env if available to allow ${VAR} references inside YAML
+        if load_dotenv is not None:
+            try:
+                load_dotenv()
+            except Exception:
+                pass
+
         with open(config_path, 'r') as file:
-            config = yaml.safe_load(file)
+            raw_yaml = file.read()
+
+        # Expand environment variables like ${VAR} within the YAML
+        expanded_yaml = os.path.expandvars(raw_yaml)
+
+        config = yaml.safe_load(expanded_yaml)
         
         if config is None:
             raise ValueError(f"Configuration file is empty: {config_path}")
