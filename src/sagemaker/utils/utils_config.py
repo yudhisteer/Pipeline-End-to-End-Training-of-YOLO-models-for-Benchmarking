@@ -204,6 +204,7 @@ def load_inference_config():
         
         return {
             'model_package_group': pipeline_config.get('model_package_group_name', 'YOLOModelPackageGroup'),
+            'job_name': inference_config.get('job_name'),  # Add the job_name field
             'metric_key': inference_config.get('metric_key', 'recall'),
             'aws_region': aws_config.get('region'),
             'bucket': aws_config.get('bucket'),
@@ -246,6 +247,7 @@ def load_inference_config():
         print(f"Could not load config.yaml: {e}. Using defaults.")
         return {
             'model_package_group': 'YOLOModelPackageGroup',
+            'job_name': None,  # Add the job_name field with default None
             'metric_key': 'recall',
             'aws_region': None,
             'bucket': None,
