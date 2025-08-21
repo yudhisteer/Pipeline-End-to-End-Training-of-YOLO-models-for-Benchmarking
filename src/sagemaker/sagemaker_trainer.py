@@ -311,8 +311,8 @@ class YOLOSageMakerTrainer:
         
         # Create PyTorch estimator
         self.estimator = PyTorch(
-            entry_point="src/sagemaker/entrypoints/entrypoint_training.py",
             source_dir="src/sagemaker",
+            entry_point="entrypoint_training.py",
             role=self.role_arn,
             framework_version="2.0",
             py_version="py310",
@@ -328,16 +328,14 @@ class YOLOSageMakerTrainer:
             base_job_name=f"{self.job_name_prefix}-{self.timestamp}"
         )
         
-        # Set model_name from config
-        model_name = self.training_config.get('model_name', 'yolo11n.pt')
-        self.estimator.set_hyperparameters(model_name=model_name)
+        # Model name will be read from config.yaml in the entrypoint
+        # No need to pass as hyperparameter since entrypoint reads config directly
         
         print(f"Created PyTorch estimator:")
         print(f"  Instance type: {instance_type}")
         print(f"  Instance count: {instance_count}")
         print(f"  Volume size: {volume_size} GB")
         print(f"  Max runtime: {max_run} seconds")
-        print(f"  Model: {model_name}")
         
         # Display hyperparameters that will be used in training
         print(f"Training hyperparameters from config:")
@@ -349,7 +347,7 @@ class YOLOSageMakerTrainer:
         
         return self.estimator
 
-    def _prepare_config_input(self) -> Optional[TrainingInput]:
+    def _prepare_basic_config_input(self) -> Optional[TrainingInput]:
         """
         Upload config.yaml to S3 and prepare it as a training input.
         
@@ -359,7 +357,7 @@ class YOLOSageMakerTrainer:
         # Check if config.yaml exists locally
         config_path = "config.yaml"
         if not os.path.exists(config_path):
-            print("config.yaml not found locally - training will use command-line args only")
+            print("config.yaml not found locally - training will use defaults")
             return None
         
         try:
@@ -383,13 +381,16 @@ class YOLOSageMakerTrainer:
             
         except Exception as e:
             print(f"Failed to upload config.yaml to S3: {e}")
-            print("Training will use command-line args only")
+            print("Training will use defaults")
             return None
-    
-    def prepare_training_inputs(self) -> Dict[str, TrainingInput]:
+
+    def prepare_training_inputs(self, execution_id: Optional[str] = None) -> Dict[str, TrainingInput]:
         """
-        Prepare all training inputs for the job.
+        Prepare training inputs for the job.
         
+        Args:
+            execution_id: Not used anymore - kept for backward compatibility
+            
         Returns:
             Dictionary of training inputs
         """
@@ -401,7 +402,7 @@ class YOLOSageMakerTrainer:
         )
         
         # Upload config.yaml to S3 and create config input
-        config_input = self._prepare_config_input()
+        config_input = self._prepare_basic_config_input()
         
         # Build inputs dictionary
         inputs = {"training": training_input}
@@ -413,7 +414,7 @@ class YOLOSageMakerTrainer:
         if config_input:
             print(f"  Config input: Available")
         else:
-            print(f"  Config input: Not available (using command-line args)")
+            print(f"  Config input: Not available (using defaults)")
         
         return inputs
     
@@ -432,7 +433,7 @@ class YOLOSageMakerTrainer:
             self.create_estimator()
         
         # Prepare training inputs
-        inputs = self.prepare_training_inputs()
+        inputs = self.prepare_training_inputs(execution_id=None)
         
         # Set custom job name if provided
         if job_name:
@@ -512,6 +513,59 @@ class YOLOSageMakerTrainer:
             "timestamp": self.timestamp,
             "s3_model_output": self.s3_model_output
         }
+
+    def get_config_s3_path(self) -> Optional[str]:
+        """
+        Get the current S3 path where config.yaml is stored.
+        
+        Returns:
+            S3 path to config.yaml directory, or None if not uploaded
+        """
+        if hasattr(self, '_config_s3_path'):
+            return self._config_s3_path
+        return None
+    
+    def upload_config_with_execution_id(self, execution_id: str) -> bool:
+        """
+        Upload config.yaml to S3 with execution ID in the path for traceability.
+        This method should be called after pipeline execution starts.
+        
+        Args:
+            execution_id: The pipeline execution ID
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        # Check if config.yaml exists locally
+        config_path = "config.yaml"
+        if not os.path.exists(config_path):
+            print("config.yaml not found locally - cannot upload")
+            return False
+        
+        try:
+            # Create config directory name with timestamp and execution ID
+            config_dir_name = f"{self.timestamp}-{execution_id}"
+            
+            # Upload config.yaml to S3 with execution ID in path
+            s3_config_key = f"{self.prefix}/config/{config_dir_name}/config.yaml"
+            s3_config_dir = f"s3://{self.bucket}/{self.prefix}/config/{config_dir_name}/"
+            
+            print(f"Uploading config.yaml with execution ID for traceability...")
+            print(f"  Local path: {config_path}")
+            print(f"  S3 location: s3://{self.bucket}/{s3_config_key}")
+            
+            s3_client = boto3.client('s3', region_name=self.region)
+            s3_client.upload_file(config_path, self.bucket, s3_config_key)
+            
+            print(f"Successfully uploaded config.yaml to: s3://{self.bucket}/{s3_config_key}")
+            print(f"  Execution ID: {execution_id}")
+            print(f"  Timestamp: {self.timestamp}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"Failed to upload config.yaml with execution ID: {e}")
+            return False
 
 
 

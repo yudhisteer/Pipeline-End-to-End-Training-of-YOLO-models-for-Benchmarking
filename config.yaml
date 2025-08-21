@@ -61,18 +61,20 @@ training:
   s3_dataset_prefix: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/
   s3_train_prefix: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/
   s3_val_prefix: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/
+  models_dir: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-models/
+  model_dir: ./runs/train
+  output_dir: ./output
   model_name: yolo11n.pt
   instance_type: ml.m5.2xlarge
   instance_count: 1
   volume_size: 30
   max_run: 3600  # 1 hour max for testing
-  model_dir: ./runs/train
-  output_dir: ./output
+
 
   # Hyperparameters actually used in training (modify these to change what's used)
   hyperparams:
     imgsz: 640
-    epochs: 20
+    epochs: 5
     batch: 4
     lr0: 0.001
     optimizer: SGD
@@ -264,6 +266,16 @@ inference:
     box_thickness: 2             # Bounding box line thickness
     font_scale: 0.6              # Font scale for labels
     save_visualizations: true    # Save visualization images
+
+
+# Evaluation Configuration (YOLO vs trained | Trained)
+evaluation:
+  metrics:
+    - mAP_0.5
+    - mAP_0.5:0.95
+    - precision
+    - recall
+    - f1_score
 
 
 

@@ -1,8 +1,9 @@
-ultralytics==8.0.196
-torch==2.0.1
-torchvision==0.15.2
-Pillow==9.5.0
-numpy==1.24.3
-opencv-python-headless==4.8.0.76
-pyyaml==6.0.1
-boto3==1.28.36
+ultralytics
+torch
+torchvision
+Pillow
+numpy<2.0
+opencv-python-headless
+pyyaml
+boto3
+python-dotenv

@@ -2,20 +2,20 @@
 # These packages will be installed in the processing container
 
 # Core data processing
-pandas>=1.5.0
-numpy>=1.21.0
-scikit-learn>=1.1.0
+pandas  
+numpy
+scikit-learn
 
 # AWS and S3
-boto3>=1.26.0
-s3fs>=2023.1.0
+boto3
+s3fs
 
 # YAML and JSON processing
-PyYAML>=6.0
-jsonschema>=4.17.0
+PyYAML
+jsonschema
 
 # File handling
-pathlib2>=2.3.0; python_version < "3.4"
+pathlib2
 
 # Logging and utilities
-rich>=13.0.0
+rich

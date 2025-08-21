@@ -96,7 +96,7 @@ class YOLOSageMakerPipeline:
         estimator = self.trainer.create_estimator()
         
         # Prepare training inputs using trainer
-        inputs = self.trainer.prepare_training_inputs()
+        inputs = self.trainer.prepare_training_inputs(execution_id=None)
         
         # Configure caching based on config
         cache_config = None
@@ -261,6 +261,21 @@ class YOLOSageMakerPipeline:
         
         print(f"Pipeline execution started successfully!")
         print(f"  Execution ARN: {execution.arn}")
+        
+        # Extract execution ID from ARN and update config path for traceability
+        try:
+            execution_id = execution.arn.split('/')[-1]
+            print(f"  Execution ID: {execution_id}")
+            
+            # Upload config with execution ID for traceability
+            if self.trainer.upload_config_with_execution_id(execution_id):
+                print(f"  Config uploaded with execution ID for traceability")
+            else:
+                print(f"  Config upload failed")
+                
+        except Exception as e:
+            print(f"  Warning: Could not extract execution ID: {e}")
+        
         print(f"\nMonitoring Information:")
         print(f"  Pipeline Name: {self.pipeline_name}")
         print(f"  Execution Name: {execution_display_name}")
