@@ -321,29 +321,38 @@ if __name__ == "__main__":
     parser.add_argument('--list-local', action='store_true',
                        help='List all locally available models')
     parser.add_argument('training_job_name', nargs='?', 
-                       help='Specific training job name to load (optional)')
+                       help='Specific training job name to load (optional, will use config if not provided)')
 
     args = parser.parse_args()
     
     if args.list_jobs:
         list_all_training_jobs_with_metrics()
-        print("\nUsage: python sagemaker_inference.py <training_job_name>")
+        print("\nUsage: python inference_local.py [training_job_name]")
+        print("  If no training_job_name is provided, will use inference.job_name from config.yaml")
         exit(0)
     
     if args.list_local:
         list_local_models()
-        print("\nUsage: python sagemaker_inference.py <training_job_name>")
+        print("\nUsage: python inference_local.py [training_job_name]")
+        print("  If no training_job_name is provided, will use inference.job_name from config.yaml")
         exit(0)
 
     print("Starting SageMaker YOLO inference script...")
     training_job_name = args.training_job_name
     
+    # If no training job name provided via command line, use the one from config
     if not training_job_name:
-        print("Error: Training job name is required!")
-        print("Usage: python sagemaker_inference.py <training_job_name>")
-        print("Use --list-jobs to see available training jobs")
-        print("Use --list-local to see locally available models")
-        exit(1)
+        training_job_name = INFERENCE_CONFIG.get('job_name')
+        if not training_job_name:
+            print("Error: No training job name provided and none configured in config.yaml!")
+            print("Usage: python inference_local.py <training_job_name>")
+            print("Or configure inference.job_name in config.yaml")
+            print("Use --list-jobs to see available training jobs")
+            print("Use --list-local to see locally available models")
+            exit(1)
+        print(f"Using training job name from config: {training_job_name}")
+    else:
+        print(f"Using training job name from command line: {training_job_name}")
     
     print(f"Loading model from specific training job: {training_job_name}")
     
@@ -462,15 +471,16 @@ if __name__ == "__main__":
 
 
     """
-    Example Command:
-
-    Run inference on a specific training job:
+    Example Commands:
 
     # List the training jobs with metrics
     python inference_local.py --list-jobs
 
     # List the locally available models
     python inference_local.py --list-local
+
+    # Run inference using the job name from config.yaml (inference.job_name)
+    python inference_local.py
 
     # Run inference on a specific training job (This will check if the model is available locally, if not, it will download from the registry)
     python inference_local.py <training_job_name>
