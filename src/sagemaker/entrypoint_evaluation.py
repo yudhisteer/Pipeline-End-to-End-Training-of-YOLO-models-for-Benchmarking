@@ -39,6 +39,8 @@ import torch
 def find_config_file():
     """Find config file in various possible locations."""
     possible_paths = [
+        "/opt/ml/processing/input_config.yaml/config.yaml",  # Add this line
+        "/opt/ml/processing/config.yaml",
         "/opt/ml/processing/input_config.yaml",  # New location from pipeline
         "/opt/ml/processing/config.yaml",
         "/opt/ml/processing/config/config.yaml",
