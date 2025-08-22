@@ -675,3 +675,108 @@ def save_metrics_for_pipeline(model_dir: str, output_dir: str) -> Dict[str, floa
     print(f"Saved metrics to {metrics_path}")
     
     return metrics
+
+
+
+def get_training_job_config(training_job_name: str) -> str:
+    """
+    Retrieve the config.yaml used during a training job from S3.
+    Focuses on pipeline training configs: {prefix}/config/{timestamp}-{execution_id}/config.yaml
+    
+    Args:
+        training_job_name: Name of the training job
+        
+    Returns:
+        Config content as string, or error message if not found
+    """
+    try:
+        # Extract execution ID from training job name
+        # Training job names typically follow pattern: pipelines-{execution_id}-{step_name}-{suffix}
+        if not training_job_name.startswith('pipelines-'):
+            return "❌ Training job name doesn't follow expected pipeline pattern (should start with 'pipelines-')"
+        
+        # Extract execution ID (part between 'pipelines-' and the next '-')
+        parts = training_job_name.split('-')
+        if len(parts) < 2:
+            return "❌ Could not extract execution ID from training job name"
+        
+        execution_id = parts[1]  # e.g., "fnthdyhhsm1z"
+        print(f"🔍 Extracted execution ID: {execution_id}")
+        
+        # Load AWS config
+        try:
+            from utils.utils_config import load_config, get_aws_config
+            config = load_config("config.yaml")
+            aws_config = get_aws_config(config)
+        except Exception:
+            # Fallback to default values
+            aws_config = {
+                'bucket': 'yolo-pipeline-bucket',  # This will likely fail, but user will see error
+                'prefix': 'yolo-pipeline'
+            }
+        
+        bucket = aws_config.get('bucket')
+        prefix = aws_config.get('prefix', 'yolo-pipeline')
+        
+        # Search for config with the specific execution ID
+        s3_client = boto3.client('s3')
+        
+        # Search pattern: {prefix}/config/*-{execution_id}/config.yaml
+        config_prefix = f"{prefix}/config/"
+        
+        config_content = None
+        found_config_path = None
+        
+        try:
+            # List objects in config directory to find matching execution ID
+            response = s3_client.list_objects_v2(
+                Bucket=bucket,
+                Prefix=config_prefix,
+                MaxKeys=1000  # Large limit to find all configs
+            )
+            
+            if 'Contents' in response:
+                # Look for config.yaml files in directories matching our execution ID
+                for obj in response['Contents']:
+                    key = obj['Key']
+                    if key.endswith('config.yaml'):
+                        # Check if this config path contains our execution ID
+                        if f"-{execution_id}/" in key:
+                            # Found the matching config!
+                            try:
+                                config_response = s3_client.get_object(Bucket=bucket, Key=key)
+                                config_content = config_response['Body'].read().decode('utf-8')
+                                found_config_path = key
+                                print(f"✅ Found config with execution ID {execution_id}: s3://{bucket}/{key}")
+                                break
+                            except Exception as e:
+                                print(f"⚠️  Could not download config from {key}: {e}")
+                                continue
+                
+                if not config_content:
+                    # Show what configs exist for debugging
+                    config_dirs = set()
+                    for obj in response['Contents']:
+                        key = obj['Key']
+                        if '/' in key and key.endswith('config.yaml'):
+                            dir_path = '/'.join(key.split('/')[:-1])  # Remove filename
+                            config_dirs.add(dir_path)
+                    
+                    if config_dirs:
+                        return f"❌ Config not found for execution ID '{execution_id}'. Available config directories:\n" \
+                               f"   {chr(10).join(f'   • s3://{bucket}/{d}' for d in sorted(config_dirs))}"
+                    else:
+                        return f"❌ No config directories found in s3://{bucket}/{config_prefix}"
+            else:
+                return f"❌ No objects found in config directory: s3://{bucket}/{config_prefix}"
+                
+        except Exception as e:
+            return f"❌ Error searching S3 for config: {str(e)}"
+        
+        if config_content:
+            return config_content
+        else:
+            return f"❌ Config not found for execution ID '{execution_id}' in s3://{bucket}/{config_prefix}"
+                   
+    except Exception as e:
+        return f"❌ Error retrieving config: {str(e)}"
