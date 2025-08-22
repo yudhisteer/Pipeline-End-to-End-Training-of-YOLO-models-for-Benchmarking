@@ -13,21 +13,60 @@ from sagemaker.processing import ProcessingInput, ProcessingOutput
 class MinimalYOLOEvaluationPipeline:
     """Minimal YOLO evaluation pipeline."""
     
-    def __init__(self, 
-                 bucket: str,
-                 role_arn: str,
-                 region: str = "us-east-1",
-                 prefix: str = "yolo-eval"):
+    def __init__(self, config_path: str = "config.yaml"):
+        # Load config
+        import yaml
+        from dotenv import load_dotenv
+        load_dotenv()
         
-        self.bucket = bucket
-        self.role_arn = role_arn
-        self.region = region
-        self.prefix = prefix
+        # Load and expand config
+        with open(config_path, 'r') as f:
+            config_content = f.read()
+
+        config_content = os.path.expandvars(config_content)
+        self.config = yaml.safe_load(config_content)
+        
+        # Extract values from config
+        aws_config = self.config.get('aws', {})
+        eval_config = self.config.get('evaluation', {})
+        
+        self.bucket = aws_config.get('bucket')
+        if not self.bucket:
+            # Try to get default bucket from SageMaker
+            try:
+                import sagemaker
+                self.bucket = sagemaker.Session().default_bucket()
+                print(f"Using SageMaker default bucket: {self.bucket}")
+            except Exception as e:
+                print(f"Warning: Could not get SageMaker default bucket: {e}")
+                self.bucket = "yolo-evaluation-bucket"  # fallback
+                print(f"Using fallback bucket: {self.bucket}")
+        
+        self.role_arn = aws_config.get('role_arn')
+        if not self.role_arn:
+            # Try to get execution role from SageMaker
+            try:
+                import sagemaker
+                self.role_arn = sagemaker.get_execution_role()
+                print(f"Using SageMaker execution role: {self.role_arn}")
+            except Exception as e:
+                print(f"Warning: Could not get SageMaker execution role: {e}")
+                print("Please set ROLE_ARN environment variable or specify in config.yaml")
+        
+        self.region = aws_config.get('region', 'us-east-1')
+        self.prefix = aws_config.get('prefix', 'yolo-eval')
+        
+        # Pipeline settings
+        pipeline_config = self.config.get('evaluation_pipeline', {})
+        self.pipeline_name = pipeline_config.get('name', 'yolo-evaluation-pipeline')
+        
+        # Evaluation parameters
+        self.test_data_s3 = eval_config.get('s3_test_dataset')
+        self.trained_model = eval_config.get('trained_model')
+        self.instance_type = eval_config.get('instance_type', 'ml.m5.large')
+        
         self.timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        
-        # Pipeline components
         self.pipeline_session = PipelineSession()
-        self.pipeline_name = f"yolo-eval-{self.timestamp}"
         
         print(f"Minimal pipeline initialized: {self.pipeline_name}")
     
@@ -63,6 +102,19 @@ class MinimalYOLOEvaluationPipeline:
             )
         ]
         
+        # Add config file if it exists locally
+        if os.path.exists("config.yaml"):
+            inputs.append(
+                ProcessingInput(
+                    source="config.yaml",  # local file
+                    destination="/opt/ml/processing/input_config.yaml",
+                    input_name="config"
+                )
+            )
+            print("✓ Config file will be uploaded")
+        else:
+            print("⚠️ Local config.yaml not found - will use defaults in processing job")
+        
         # Define output
         output_s3 = f"s3://{self.bucket}/{self.prefix}/results/{self.timestamp}"
         outputs = [
@@ -79,7 +131,7 @@ class MinimalYOLOEvaluationPipeline:
             processor=processor,
             inputs=inputs,
             outputs=outputs,
-            code="src/sagemaker/entrypoint_evaluation.py"  # Make sure this file exists
+            code="src/sagemaker/entrypoint_evaluation.py"
         )
         
         # Create pipeline
@@ -165,35 +217,34 @@ class MinimalYOLOEvaluationPipeline:
 
 def main():
     """Main function."""
+    config_path = "config.yaml"  # or from command line arg
     
-    # Get parameters from environment
-    bucket = os.environ.get("SAGEMAKER_BUCKET")
-    role_arn = os.environ.get("SAGEMAKER_ROLE")
-    test_data_s3 = os.environ.get("TEST_DATA_S3")
-    trained_model_s3 = os.environ.get("TRAINED_MODEL_S3")
-    wait = os.environ.get("WAIT", "false").lower() == "true"
-    
-    if not all([bucket, role_arn, test_data_s3, trained_model_s3]):
-        print("Missing required environment variables:")
-        print("  SAGEMAKER_BUCKET")
-        print("  SAGEMAKER_ROLE") 
-        print("  TEST_DATA_S3")
-        print("  TRAINED_MODEL_S3")
+    try:
+        pipeline = MinimalYOLOEvaluationPipeline(config_path)
+        
+        # Validate required config values
+        if not pipeline.test_data_s3:
+            raise ValueError("test_data_s3 not found in config. Please check the 'evaluation.s3_test_dataset' field.")
+        if not pipeline.trained_model:
+            raise ValueError("trained_model not found in config. Please check the 'evaluation.trained_model' field.")
+        
+        print(f"Using test data: {pipeline.test_data_s3}")
+        print(f"Using trained model: {pipeline.trained_model}")
+        
+        result = pipeline.run_evaluation(
+            test_data_s3=pipeline.test_data_s3,
+            trained_model_s3=pipeline.trained_model,
+            wait=False
+        )
+        
+        return result
+        
+    except FileNotFoundError:
+        print("config.yaml not found. Please create configuration file.")
         return
-    
-    # Create and run pipeline
-    pipeline = MinimalYOLOEvaluationPipeline(
-        bucket=bucket,
-        role_arn=role_arn
-    )
-    
-    result = pipeline.run_evaluation(
-        test_data_s3=test_data_s3,
-        trained_model_s3=trained_model_s3,
-        wait=wait
-    )
-    
-    return result
+    except Exception as e:
+        print(f"Error: {e}")
+        return
 
 if __name__ == "__main__":
     main()
