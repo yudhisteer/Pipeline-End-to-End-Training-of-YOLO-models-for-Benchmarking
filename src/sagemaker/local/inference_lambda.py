@@ -7,6 +7,12 @@ import base64
 import json
 import os
 from pathlib import Path
+import sys
+import os
+    
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+from src.sagemaker.utils.utils_config import load_config, get_lambda_config
+
 
 def encode_image_to_base64(image_path):
     """Convert image file to base64 string"""
@@ -21,11 +27,11 @@ def encode_image_to_base64(image_path):
         print(f"Error reading image: {e}")
         return None
 
-def test_health_check(base_url="http://127.0.0.1:3000"):
+def test_health_check(base_url="http://127.0.0.3000", health_endpoint="/health"):
     """Test the health check endpoint"""
-    print("🔍 Testing health check...")
+    print(f"Testing health check at {base_url}{health_endpoint}...")
     try:
-        response = requests.get(f"{base_url}/health", timeout=10)
+        response = requests.get(f"{base_url}{health_endpoint}", timeout=10)
         print(f"Status Code: {response.status_code}")
         print(f"Response: {response.json()}")
         return response.status_code == 200
@@ -33,13 +39,13 @@ def test_health_check(base_url="http://127.0.0.1:3000"):
         print(f"Health check failed: {e}")
         return False
 
-def test_yolo_inference(image_path, base_url="http://127.0.0.1:3000", confidence_threshold=0.5):
+def test_yolo_inference(image_path, base_url="http://127.0.0.1:3000", confidence_threshold=0.3, predict_endpoint="/predict") -> bool:
     """Test YOLO inference with a local image"""
-    print(f"\n🖼️  Testing YOLO inference with image: {image_path}")
+    print(f"\nTesting YOLO inference with image: {image_path}")
     
     # Check if image exists
     if not os.path.exists(image_path):
-        print(f"❌ Image not found: {image_path}")
+        print(f"Image not found: {image_path}")
         return False
     
     # Get image info
@@ -47,12 +53,10 @@ def test_yolo_inference(image_path, base_url="http://127.0.0.1:3000", confidence
     print(f"Image size: {file_size:.1f} KB")
     
     # Encode image
-    print("📦 Encoding image to base64...")
+    print("Encoding image to base64...")
     base64_image = encode_image_to_base64(image_path)
     if not base64_image:
         return False
-    
-    print(f"Base64 length: {len(base64_image)} characters")
     
     # Prepare request
     payload = {
@@ -64,22 +68,22 @@ def test_yolo_inference(image_path, base_url="http://127.0.0.1:3000", confidence
         "Content-Type": "application/json"
     }
     
-    print(f"🚀 Sending inference request (confidence threshold: {confidence_threshold})...")
+    print(f"Sending inference request (confidence threshold: {confidence_threshold})...")
     
     try:
         # Send request
         response = requests.post(
-            f"{base_url}/predict", 
+            f"{base_url}{predict_endpoint}", 
             json=payload, 
             headers=headers,
-            timeout=60  # Give it time for inference
+            timeout=60
         )
         
         print(f"Status Code: {response.status_code}")
         
         if response.status_code == 200:
             result = response.json()
-            print("✅ Inference successful!")
+            print("Inference successful!")
             print(f"Number of detections: {result.get('num_detections', 0)}")
             
             # Print model info
@@ -89,7 +93,7 @@ def test_yolo_inference(image_path, base_url="http://127.0.0.1:3000", confidence
             
             # Print detections
             if result.get('detections'):
-                print("\n🎯 Detections found:")
+                print("\nDetections found:")
                 for i, detection in enumerate(result['detections']):
                     # Use the correct field names from our Lambda response
                     bbox_center = detection.get('bbox_center', [])
@@ -111,13 +115,13 @@ def test_yolo_inference(image_path, base_url="http://127.0.0.1:3000", confidence
                     class_scores = detection.get('class_scores', [])
                     if len(class_scores) > 1:
                         print(f"    Class Scores (first 5): {[f'{score:.3f}' for score in class_scores[:5]]}")
-                    print()  # Empty line between detections
+                    print("\n")
             else:
                 print("No detections found")
             
             return True
         else:
-            print("❌ Inference failed!")
+            print("Inference failed!")
             try:
                 error_response = response.json()
                 print(f"Error: {error_response}")
@@ -126,38 +130,49 @@ def test_yolo_inference(image_path, base_url="http://127.0.0.1:3000", confidence
             return False
             
     except requests.exceptions.Timeout:
-        print("❌ Request timed out - inference took too long")
+        print("Request timed out - inference took too long")
         return False
     except requests.exceptions.RequestException as e:
-        print(f"❌ Request failed: {e}")
+        print(f"Request failed: {e}")
         return False
 
 def main():
     """Main test function"""
-    print("🧪 YOLO Lambda Inference Test")
+    print("YOLO Lambda Inference Test")
     print("=" * 40)
     
-    # Configuration
-    base_url = "http://127.0.0.1:3000"
-    image_path = "dataset/yolo-dataset/train/images/000000000790.jpg"
-    confidence_threshold = 0.3  # Lower threshold to see more detections
+    # Load configuration from config.yaml
+    config = load_config("config.yaml")
+    lambda_config = get_lambda_config(config)
+
+    print(f"   Loaded configuration from config.yaml")
+    print(f"   Base URL: {lambda_config['local_base_url']}")
+    print(f"   Image Path: {lambda_config['image_path']}")
+    print(f"   Confidence Threshold: {lambda_config['confidence_threshold']}")
+    print(f"   Model Bucket: {lambda_config['model_s3_bucket']}")
+    print(f"   Model Key: {lambda_config['model_s3_key']}")
+
+    # Use configuration values
+    base_url = lambda_config['local_base_url']
+    image_path = lambda_config['image_path']
+    confidence_threshold = lambda_config['confidence_threshold']
     
     # Test 1: Health check
-    if not test_health_check(base_url):
-        print("❌ Health check failed. Make sure SAM local is running.")
+    health_endpoint = lambda_config.get('health_endpoint', "/health") if lambda_config else "/health"
+    if not test_health_check(base_url, health_endpoint):
+        print("Health check failed. Make sure SAM local is running.")
         return
     
-    print("✅ Health check passed!")
+    print("Health check passed!")
     
     # Test 2: YOLO inference
-    success = test_yolo_inference(image_path, base_url, confidence_threshold)
+    predict_endpoint = lambda_config.get('predict_endpoint', "/predict") if lambda_config else "/predict"
+    success = test_yolo_inference(image_path, base_url, confidence_threshold, predict_endpoint)
     
     if success:
-        print("\n🎉 All tests passed!")
+        print("\nAll tests passed!")
     else:
-        print("\n❌ Inference test failed")
-    
-    print("\nTip: Try different confidence thresholds (0.1 - 0.9) to see more/fewer detections")
+        print("\nInference test failed")
 
 if __name__ == "__main__":
     main()
