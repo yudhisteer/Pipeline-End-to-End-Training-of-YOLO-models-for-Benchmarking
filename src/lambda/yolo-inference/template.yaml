@@ -1,0 +1,150 @@
+# AWSTemplateFormatVersion: '2010-09-09'
+# Transform: AWS::Serverless-2016-10-31
+
+# Globals:
+#   Function:
+#     Timeout: 50
+#     MemorySize: 5000
+#     Tracing: Active
+#     # You can add LoggingConfig parameters such as the Logformat, Log Group, and SystemLogLevel or ApplicationLogLevel. Learn more here https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-function.html#sam-function-loggingconfig.
+#     LoggingConfig:
+#       LogFormat: JSON
+#   Api:
+#     BinaryMediaTypes:
+#     - image/png
+#     - image/jpg
+#     - image/jpeg
+
+#     TracingEnabled: true
+# Resources:
+#   InferenceFunction:
+#     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+#     Properties:
+#       PackageType: Image
+#       Architectures:
+#       - x86_64
+#       Events:
+#         Inference:
+#           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+#           Properties:
+#             Path: /classify_digit
+#             Method: post
+#     Metadata:
+#       Dockerfile: Dockerfile
+#       DockerContext: ./app
+#       DockerTag: 2-v1
+
+#   ApplicationResourceGroup:
+#     Type: AWS::ResourceGroups::Group
+#     Properties:
+#       Name:
+#         Fn::Sub: ApplicationInsights-SAM-${AWS::StackName}
+#       ResourceQuery:
+#         Type: CLOUDFORMATION_STACK_1_0
+#   ApplicationInsightsMonitoring:
+#     Type: AWS::ApplicationInsights::Application
+#     Properties:
+#       ResourceGroupName:
+#         Ref: ApplicationResourceGroup
+#       AutoConfigurationEnabled: 'true'
+# Outputs:
+#   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+#   # Find out more about other implicit resources you can reference within SAM
+#   # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+#   InferenceApi:
+#     Description: API Gateway endpoint URL for Prod stage for Inference function
+#     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/classify_digit/"
+#   InferenceFunction:
+#     Description: Inference Lambda Function ARN
+#     Value: !GetAtt InferenceFunction.Arn
+#   InferenceFunctionIamRole:
+#     Description: Implicit IAM Role created for Inference function
+#     Value: !GetAtt InferenceFunctionRole.Arn
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Globals:
+  Function:
+    Timeout: 300  # 5 minutes for YOLO inference
+    MemorySize: 10240  # 10GB memory for Docker Lambda
+    Tracing: Active
+    LoggingConfig:
+      LogFormat: JSON
+  Api:
+    BinaryMediaTypes:
+      - image/png
+      - image/jpg
+      - image/jpeg
+      - image/gif
+      - image/bmp
+      - application/octet-stream
+    TracingEnabled: true
+
+Resources:
+  YOLOInferenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Architectures:
+        - x86_64
+      Policies:
+        - S3ReadPolicy:
+            BucketName: cyudhist-pipeline-yolo-503561429929
+        - S3ReadPolicy:
+            BucketName: "*"  # In case you need to read images from other buckets
+      Environment:
+        Variables:
+          MODEL_S3_BUCKET: cyudhist-pipeline-yolo-503561429929
+          MODEL_S3_KEY: yolo-pipeline/onnx-models/best.onnx
+      Events:
+        YOLOInference:
+          Type: Api
+          Properties:
+            Path: /predict
+            Method: post
+            Auth:
+              ApiKeyRequired: false
+        HealthCheck:
+          Type: Api
+          Properties:
+            Path: /health
+            Method: get
+            Auth:
+              ApiKeyRequired: false
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./app
+      DockerTag: yolo-v1
+
+  ApplicationResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name:
+        Fn::Sub: ApplicationInsights-SAM-${AWS::StackName}
+      ResourceQuery:
+        Type: CLOUDFORMATION_STACK_1_0
+
+  ApplicationInsightsMonitoring:
+    Type: AWS::ApplicationInsights::Application
+    Properties:
+      ResourceGroupName:
+        Ref: ApplicationResourceGroup
+      AutoConfigurationEnabled: 'true'
+
+Outputs:
+  YOLOInferenceApi:
+    Description: API Gateway endpoint URL for YOLO inference
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/predict"
+  
+  HealthCheckApi:
+    Description: Health check endpoint URL
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/health"
+    
+  YOLOInferenceFunction:
+    Description: YOLO Inference Lambda Function ARN
+    Value: !GetAtt YOLOInferenceFunction.Arn
+    
+  YOLOInferenceFunctionIamRole:
+    Description: Implicit IAM Role created for YOLO Inference function
+    Value: !GetAtt YOLOInferenceFunctionRole.Arn
