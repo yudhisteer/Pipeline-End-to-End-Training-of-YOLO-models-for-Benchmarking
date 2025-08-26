@@ -64,7 +64,7 @@ training:
   models_dir: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-models/
   model_dir: ./runs/train
   output_dir: ./output
-  model_name: yolo11n.pt
+  model_name: yolo12n.pt
   instance_type: ml.m5.2xlarge
   instance_count: 1
   volume_size: 30
@@ -74,7 +74,7 @@ training:
   # Hyperparameters actually used in training (modify these to change what's used)
   hyperparams:
     imgsz: 640
-    epochs: 5
+    epochs: 25
     batch: 4
     lr0: 0.001
     optimizer: SGD
@@ -220,62 +220,141 @@ validation:
   max_inference_time_ms: 100
 
 
-# Deployment
+# Deployment Configuration
 deployment:
-  enabled: true                # Set to true to enable deployment
-  default_job_name: "pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB" # Default training job name to deploy from (if not provided as argument) - set this to your actual training job name example: "pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB"
-  instance_type: "ml.m5.12xlarge"     # Instance type for deployment and inference
-  model_server:
-    timeout: 3600      # 1 hour for model loading
-    workers: 1         # Single worker to avoid memory issues
-    response_timeout: 900  # 15 minutes for inference
-  endpoint_name: "yolo-endpoint-object-detection-v16"  # Name of the SageMaker endpoint # must not contain underscores and must be unique each time deployment is run
-  model_package_name: "yolo-model-package-object-detection"  # Model package name for deployment
-  initial_instance_count: 1      # Initial number of instances for the endpoint
-  auto_scaling_enabled: false     # Enable auto-scaling for the endpoint
-  auto_delete: false            # Automatically delete endpoint after deployment (for testing)
-
+  mode: lambda # lambda or endpoint or serverless
+  endpoint_name: "yolo-endpoint-object-detection-v17"
+  default_job_name: "pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB"
+  model_package_name: "yolo-model-package-object-detection"
+  
+  # Lambda Configuration
+  lambda:
+    function_name: "yolo-inference-function"
+    stack_name: "yolo-inference-stack"
+    memory_size: 10240  # 10GB memory for Docker Lambda
+    timeout: 300        # 5 minutes timeout
+    architecture: "x86_64"
+    package_type: "Image"
+    
+    # API Gateway configuration
+    api_gateway:
+      binary_media_types:
+        - "image/png"
+        - "image/jpg"
+        - "image/jpeg"
+        - "image/gif"
+        - "image/bmp"
+        - "application/octet-stream"
+      tracing_enabled: true
+    
+    # S3 bucket access
+    s3_bucket_access:
+      - "cyudhist-pipeline-yolo-503561429929"
+  
+  # SageMaker Endpoint Configuration (for fallback)
+  sagemaker:
+    instance_type: "ml.m5.12xlarge"
+    model_server:
+      timeout: 3600
+      workers: 1
+      response_timeout: 900
+    initial_instance_count: 1
+    auto_scaling_enabled: false
+  
+  enabled: true
+  auto_delete: false
 
 # Inference Configuration
 inference:
+  model_data: "s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/models/20250819-220843/pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB/output/model.tar.gz"
   job_name: "pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB"
-  metric_key: "recall"             # recall, map_50
-
-  # Thresholds and parameters
-  confidence_threshold: 0.3      # Default confidence threshold (0.0 - 1.0)
-  iou_threshold: 0.5               # IoU threshold (0.0 - 1.0)
-
-  # Input/Output settings
+  metric_key: "recall"
+  
+  # Default inference parameters (can be overridden at runtime)
+  confidence_threshold: 0.7
+  iou_threshold: 0.5
+  max_image_size: 640
+  
+  # Supported file formats
   supported_formats: [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"]
-  max_image_size: 640              # Maximum image dimension (pixels) - faster inference
-  output_dir: "./output"           # Directory for saving inference results
-
+  output_dir: "./output"
+  
+  # Lambda Runtime Configuration
+  lambda:
+    # API endpoints
+    base_url: "https://nzhux8c6x6.execute-api.us-east-1.amazonaws.com/Prod"
+    local_base_url: "http://127.0.0.1:3000"
+    endpoints:
+      health: "/health"
+      predict: "/predict"
+    
+    # Request configuration
+    request_timeout: 300
+    max_retries: 3
+    retry_delay: 1
+    
+    # Performance settings
+    warm_up_requests: 1
+    batch_processing: false
+    
+    # Monitoring
+    enable_cloudwatch_logs: true
+    log_level: "INFO"
+    metrics_enabled: true
+  
   # Test configuration
   test:
-    job_name: "pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB"
-    image_path: "dataset/yolo-dataset/train/images/000000000790.jpg" # Path to test image (relative to project root, will be converted to absolute path)
+    image_path: "dataset/yolo-dataset/val/images/000000013546.jpg"
 
+    # Batch test settings
+    s3_bucket: "cyudhist-pipeline-yolo-503561429929"
+    s3_prefix: "yolo-pipeline/yolo-dataset/val/images" #change to s3_test_dataset
+    batch_size: 5  # Number of images to test
+  
   # Visualization configuration
   visualization:
-    figure_size: [12, 8]         # Figure size for visualizations
-    line_width: 3.5              # Bounding box line width
-    font_size: 12                # Font size for labels
-    dpi: 150                     # DPI for saved images
-    show_confidence: true        # Show confidence scores in labels
-    show_class_names: true       # Show class names in labels
-    box_thickness: 2             # Bounding box line thickness
-    font_scale: 0.6              # Font scale for labels
-    save_visualizations: true    # Save visualization images
+    figure_size: [12, 8]
+    line_width: 3.5
+    font_size: 12
+    dpi: 150
+    show_confidence: true
+    show_class_names: true
+    box_thickness: 2
+    font_scale: 0.6
+    save_visualizations: true
 
 
-# Evaluation Configuration (YOLO vs trained | Trained)
+# Evaluation Configuration
 evaluation:
+  # Pipeline configuration
+  name: "yolo-evaluation-pipeline"
+  evaluation_step_name: "YOLOEvaluationStep"
+  
+  # Test dataset location (required)
+  s3_test_dataset: "s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/"
+  
+  # successfull training job name
+  trained_model_job: "pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB"
+  
+  # Baseline model to compare trained model with
+  yolo_baseline_model: "yolo12n"
+
+  # Compute configuration
+  instance_type: "ml.m5.xlarge"
+  instance_count: 1
+  volume_size: 30  # GB
+  max_runtime: 3600  # 1 hour
+  
+  # Evaluation metrics configuration
   metrics:
-    - mAP_0.5
-    - mAP_0.5:0.95
-    - precision
-    - recall
-    - f1_score
+    confidence_threshold: 0.25
+    iou_threshold: 0.45
+    max_detections: 300
+  
+  # Output configuration
+  output:
+    save_predictions: true
+    save_visualizations: true
 
 
 
@@ -292,6 +371,49 @@ evaluation:
       output_extract_dir: "temp_output_dir"     # Temporary directory for extracting output
       model_archive: "model.tar.gz"             # Temporary file for downloading model artifacts
       model_extract_dir: "./models"            # Directory for extracting and storing models
+
+# Lambda Deployment Tools Configuration
+lambda_tools:
+  # SAM (Serverless Application Model) configuration
+  sam:
+    template_path: "src/sagemaker/lambda/yolo-inference/template.yaml"
+    build_dir: "src/sagemaker/lambda/yolo-inference/.aws-sam"
+    package_dir: "src/sagemaker/lambda/yolo-inference/packaged"
+    
+    # Build configuration
+    build:
+      use_container: true          # Use Docker container for building
+      parallel: true               # Enable parallel builds
+      cached: true                 # Use cached layers
+    
+    # Deploy configuration
+    deploy:
+      guided: false                # Non-interactive deployment
+      confirm_changeset: false     # Auto-confirm changes
+      capabilities: ["CAPABILITY_IAM", "CAPABILITY_NAMED_IAM"]
+      parameter_overrides:
+        - "FunctionName=yolo-inference-function"
+        - "StackName=yolo-inference-stack"
+  
+  # Docker configuration for Lambda
+  docker:
+    base_image: "public.ecr.aws/lambda/python:3.9"
+    requirements_file: "src/sagemaker/lambda/yolo-inference/requirements.txt"
+    dockerfile_path: "src/sagemaker/lambda/yolo-inference/Dockerfile"
+    
+    # Build settings
+    build_args:
+      - "BUILDKIT_INLINE_CACHE=1"
+    no_cache: false
+    pull: true
+  
+  # Local testing configuration
+  local_testing:
+    sam_local: true               # Use SAM local for testing
+    port: 3000                    # Local port for testing
+    host: "127.0.0.1"
+    warm_containers: 1            # Number of warm containers
+    debug: true                   # Enable debug mode
 
   # CloudWatch Configuration
   cloudwatch:

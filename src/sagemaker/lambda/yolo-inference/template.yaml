@@ -17,6 +17,8 @@ Globals:
       - image/bmp
       - application/octet-stream
     TracingEnabled: true
+    Auth:
+      ApiKeyRequired: false
 
 Resources:
   YOLOInferenceFunction:
@@ -40,15 +42,11 @@ Resources:
           Properties:
             Path: /predict
             Method: post
-            Auth:
-              ApiKeyRequired: false
         HealthCheck:
           Type: Api
           Properties:
             Path: /health
             Method: get
-            Auth:
-              ApiKeyRequired: false
     Metadata:
       Dockerfile: Dockerfile
       DockerContext: ./app

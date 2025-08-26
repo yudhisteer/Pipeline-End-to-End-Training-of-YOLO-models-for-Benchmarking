@@ -16,6 +16,10 @@ capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
 resolve_image_repos = true
+stack_name = "yolo-inference-batch"
+s3_prefix = "yolo-inference-batch"
+region = "us-east-1"
+disable_rollback = true
 
 [default.package.parameters]
 resolve_s3 = true
