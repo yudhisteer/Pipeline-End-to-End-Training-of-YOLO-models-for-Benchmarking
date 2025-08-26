@@ -181,6 +181,130 @@ def postprocess_predictions(predictions, confidence_threshold=0.5):
     
     return detections
 
+def process_single_image(body, model):
+    """Process single image (existing logic)"""
+    # Handle different input methods
+    if 'image_base64' in body:
+        image_data = body['image_base64']
+    elif 's3_bucket' in body and 's3_key' in body:
+        response = s3_client.get_object(Bucket=body['s3_bucket'], Key=body['s3_key'])
+        image_data = response['Body'].read()
+    else:
+        return {
+            'statusCode': 400,
+            'body': json.dumps({
+                'error': 'No image provided. Send image_base64 or s3_bucket/s3_key'
+            })
+        }
+    
+    # Preprocess and run inference
+    input_array = preprocess_image(image_data)
+    input_name = model.get_inputs()[0].name
+    predictions = model.run(None, {input_name: input_array})
+    
+    # Debug: print prediction info
+    print(f"Number of outputs: {len(predictions)}")
+    for i, pred in enumerate(predictions):
+        print(f"Output {i} shape: {pred.shape}")
+    
+    confidence_threshold = body.get('confidence_threshold', 0.5)
+    detections = postprocess_predictions(predictions, confidence_threshold)
+    
+    return {
+        'statusCode': 200,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        },
+        'body': json.dumps({
+            'detections': detections,
+            'num_detections': len(detections),
+            'model_info': {
+                'input_shape': [input.shape for input in model.get_inputs()],
+                'output_shape': [output.shape for output in model.get_outputs()]
+            }
+        })
+    }
+
+def process_batch_images(body, model):
+    """Process multiple images in batch"""
+    images = body.get('images', [])
+    confidence_threshold = body.get('confidence_threshold', 0.5)
+    chunk_size = body.get('chunk_size', 10)  # Process 10 images at a time
+    
+    if not images:
+        return {
+            'statusCode': 400,
+            'body': json.dumps({'error': 'No images provided in batch'})
+        }
+    
+    print(f"Processing batch of {len(images)} images in chunks of {chunk_size}")
+    
+    results = []
+    total_processing_time = 0
+    
+    # Process images in chunks
+    for chunk_idx in range(0, len(images), chunk_size):
+        chunk = images[chunk_idx:chunk_idx + chunk_size]
+        chunk_results = process_image_chunk(chunk, model, confidence_threshold)
+        results.extend(chunk_results)
+    
+    return {
+        'statusCode': 200,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        },
+        'body': json.dumps({
+            'results': results,
+            'batch_size': len(images),
+            'chunks_processed': (len(images) + chunk_size - 1) // chunk_size,
+            'total_detections': sum(len(r.get('detections', [])) for r in results)
+        })
+    }
+
+def process_image_chunk(image_chunk, model, confidence_threshold):
+    """Process a chunk of images"""
+    chunk_results = []
+    print(f"DEBUG: Starting batch processing")
+    
+    for img_info in image_chunk:
+        try:
+            # Get image data
+            if 'image_base64' in img_info:
+                image_data = img_info['image_base64']
+            elif 's3_bucket' in img_info and 's3_key' in img_info:
+                response = s3_client.get_object(Bucket=img_info['s3_bucket'], Key=img_info['s3_key'])
+                image_data = response['Body'].read()
+            else:
+                chunk_results.append({
+                    'image_id': img_info.get('image_id', 'unknown'),
+                    'status': 'error',
+                    'error': 'No valid image data provided'
+                })
+                continue
+            
+            # Process single image
+            input_array = preprocess_image(image_data)
+            input_name = model.get_inputs()[0].name
+            predictions = model.run(None, {input_name: input_array})
+            detections = postprocess_predictions(predictions, confidence_threshold)
+            
+            chunk_results.append({
+                'image_id': img_info.get('image_id', f'image_{len(chunk_results)}'),
+                'status': 'success',
+                'detections': detections,
+                'num_detections': len(detections)
+            })
+            
+        except Exception as e:
+            print(f"DEBUG: Error in process_batch_images: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise e
+    
+    return chunk_results
+
 def lambda_handler(event, context):
     """Main Lambda handler"""
     try:
@@ -219,60 +343,19 @@ def lambda_handler(event, context):
                     'error': 'Request body is required for inference',
                     'usage': {
                         'image_base64': 'Send base64 encoded image',
-                        's3_bucket + s3_key': 'Reference image in S3'
+                        's3_bucket + s3_key': 'Reference image in S3',
+                        'images': 'Array of images for batch processing'
                     }
                 })
             }
         
-        # Handle different input methods
-        if 'image_base64' in body:
-            # Base64 encoded image
-            image_data = body['image_base64']
-        elif 's3_bucket' in body and 's3_key' in body:
-            # Image from S3
-            response = s3_client.get_object(Bucket=body['s3_bucket'], Key=body['s3_key'])
-            image_data = response['Body'].read()
+        # Check for batch vs single image processing
+        if 'images' in body:
+            # Batch processing
+            return process_batch_images(body, model)
         else:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({
-                    'error': 'No image provided. Send image_base64 or s3_bucket/s3_key'
-                })
-            }
-        
-        # Preprocess image
-        input_array = preprocess_image(image_data)
-        
-        # Get input name from model
-        input_name = model.get_inputs()[0].name
-        
-        # Run inference
-        predictions = model.run(None, {input_name: input_array})
-        
-        # Debug: print prediction info
-        print(f"Number of outputs: {len(predictions)}")
-        for i, pred in enumerate(predictions):
-            print(f"Output {i} shape: {pred.shape}")
-        
-        # Post-process predictions
-        confidence_threshold = body.get('confidence_threshold', 0.5)
-        detections = postprocess_predictions(predictions, confidence_threshold)
-        
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            'body': json.dumps({
-                'detections': detections,
-                'num_detections': len(detections),
-                'model_info': {
-                    'input_shape': [input.shape for input in model.get_inputs()],
-                    'output_shape': [output.shape for output in model.get_outputs()]
-                }
-            })
-        }
+            # Single image processing
+            return process_single_image(body, model)
         
     except Exception as e:
         print(f"Error: {str(e)}")
