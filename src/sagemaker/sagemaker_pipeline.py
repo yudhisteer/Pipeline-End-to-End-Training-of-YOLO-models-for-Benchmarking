@@ -15,7 +15,7 @@ from sagemaker.workflow.pipeline_context import PipelineSession
 from sagemaker.model_metrics import ModelMetrics, MetricsSource
 
 from utils.utils_config import load_config, get_validation_config
-from sagemaker_trainer import YOLOSageMakerTrainer
+from entrypoint_trainer import YOLOSageMakerTrainer
 from sagemaker_metrics import display_training_job_metrics
 
 
