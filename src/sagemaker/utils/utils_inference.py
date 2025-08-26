@@ -46,7 +46,7 @@ def visualize_detections(
     detections: List[Tuple], 
     threshold: float = 0.3,
     save_path: str = None
-    ):
+    ) -> None:
     """
     Visualize detections on image using configuration.
     
@@ -185,7 +185,7 @@ def get_s3_images(bucket: str, prefix: str, max_images: int = 10) -> list[dict]:
     try:
         print(f"Listing images in s3://{bucket}/{prefix}...")
         
-        # List objects with the given prefix
+        # list objects with the given prefix
         paginator = s3_client.get_paginator('list_objects_v2')
         pages = paginator.paginate(Bucket=bucket, Prefix=prefix)
         
@@ -196,7 +196,7 @@ def get_s3_images(bucket: str, prefix: str, max_images: int = 10) -> list[dict]:
             if 'Contents' in page:
                 for obj in page['Contents']:
                     key = obj['Key']
-                    # Check if it's an image file
+                    # check if it's an image file
                     if any(key.lower().endswith(ext) for ext in image_extensions):
                         images.append({
                             'key': key,
@@ -204,13 +204,13 @@ def get_s3_images(bucket: str, prefix: str, max_images: int = 10) -> list[dict]:
                             'last_modified': obj['LastModified']
                         })
         
-        # Sort by name and limit
+        # sort by name and limit
         images.sort(key=lambda x: x['key'])
         images = images[:max_images]
         
         print(f"Found {len(images)} image files:")
         for i, img in enumerate(images):
-            filename = img['key'].split('/')[-1]  # Get just the filename
+            filename = img['key'].split('/')[-1]  # get just the filename
             size_kb = img['size'] / 1024
             print(f"  {i+1:2d}. {filename} ({size_kb:.1f} KB)")
         
