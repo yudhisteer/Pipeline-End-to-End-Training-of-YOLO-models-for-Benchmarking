@@ -3,6 +3,7 @@ import os
 import random
 import tempfile
 import boto3
+import base64       
 from typing import List, Tuple
 
 import matplotlib.image as mpimg
@@ -150,3 +151,81 @@ def visualize_detections(
     
     plt.close()
     print(f"Number of detections: {num_detections}")
+
+
+
+def get_s3_images(bucket: str, prefix: str, max_images: int = 10) -> list[dict]:
+    """
+    Get list of image files from S3 bucket and return list of dicts with image info.
+    
+    Args:
+        bucket: S3 bucket name
+        prefix: S3 prefix
+        max_images: maximum number of images to return
+    Returns:
+        list of dicts with image info
+
+        Example:
+        [
+            {
+                'key': 'path/to/image.jpg',
+                'size': 1024,
+                'last_modified': '2021-01-01T00:00:00Z'
+            },
+            {
+                'key': 'path/to/image2.jpg',
+                'size': 2048,
+                'last_modified': '2021-01-01T00:00:00Z'
+            },
+            ...
+        ]
+    """
+    s3_client = boto3.client('s3')
+    
+    try:
+        print(f"Listing images in s3://{bucket}/{prefix}...")
+        
+        # List objects with the given prefix
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=bucket, Prefix=prefix)
+        
+        image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}
+        images = []
+        
+        for page in pages:
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    key = obj['Key']
+                    # Check if it's an image file
+                    if any(key.lower().endswith(ext) for ext in image_extensions):
+                        images.append({
+                            'key': key,
+                            'size': obj['Size'],
+                            'last_modified': obj['LastModified']
+                        })
+        
+        # Sort by name and limit
+        images.sort(key=lambda x: x['key'])
+        images = images[:max_images]
+        
+        print(f"Found {len(images)} image files:")
+        for i, img in enumerate(images):
+            filename = img['key'].split('/')[-1]  # Get just the filename
+            size_kb = img['size'] / 1024
+            print(f"  {i+1:2d}. {filename} ({size_kb:.1f} KB)")
+        
+        return images
+        
+    except Exception as e:
+        print(f"Error listing S3 images: {e}")
+        return []
+
+
+def encode_image_to_base64(image_path: str) -> str:
+    """Convert image file to base64 string"""
+    try:
+        with open(image_path, 'rb') as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+        return encoded_string
+    except Exception as e:
+        raise Exception(f"Error reading image: {e}")
