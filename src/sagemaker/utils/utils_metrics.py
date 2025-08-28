@@ -18,7 +18,7 @@ from rich.table import Table
 from utils.utils_config import (
     get_validation_config,
     load_config,
-    load_inference_config
+    get_inference_config
 )
 
 
@@ -617,7 +617,8 @@ def send_metrics_to_cloudwatch(recall: float, map_50: float, region: str = None)
         ]
         
         # Send metrics to CloudWatch
-        config = load_inference_config()
+        full_config = load_config()
+        config = get_inference_config(full_config)
         namespace = config['cloudwatch']['namespace']
         cloudwatch.put_metric_data(
             Namespace=namespace,
@@ -665,7 +666,8 @@ def save_metrics_for_pipeline(model_dir: str, output_dir: str) -> Dict[str, floa
     
     # Save metrics for pipeline
     os.makedirs(output_dir, exist_ok=True)
-    config = load_inference_config()
+    full_config = load_config()
+    config = get_inference_config(full_config)
     metrics_filename = config['registry']['evaluation_metrics_file']
     metrics_path = os.path.join(output_dir, metrics_filename)
     with open(metrics_path, "w") as f:
