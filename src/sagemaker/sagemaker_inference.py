@@ -3,8 +3,6 @@ Script to test YOLO Lambda inference
 """
 
 import requests
-
-
     
 from utils.utils_config import load_config, get_inference_config
 from utils.utils_inference import get_s3_images, save_results_and_visualizations

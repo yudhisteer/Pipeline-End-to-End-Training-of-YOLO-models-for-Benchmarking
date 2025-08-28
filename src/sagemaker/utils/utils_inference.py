@@ -4,10 +4,14 @@ import random
 import tempfile
 import boto3
 import base64       
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Union, Optional  
 from datetime import datetime
 import json
 import matplotlib.image as mpimg
+import numpy as np
+
+# we use the same timestamp
+GLOBAL_TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 def list_local_models():
@@ -17,7 +21,7 @@ def list_local_models():
         print("No local models found.")
         return
     
-    print("📁 Locally Available Models:")
+    print("Locally Available Models:")
     print("=" * 50)
     
     for item in os.listdir(models_dir):
@@ -42,116 +46,6 @@ def list_local_models():
     print("=" * 50)
 
 
-def visualize_detections(
-    image_path: str, 
-    detections: List[Tuple], 
-    threshold: float = 0.3,
-    save_path: str = None
-    ) -> None:
-    """
-    Visualize detections on image using configuration.
-    
-    Args:
-        image_path: Path to image file or S3 path
-        detections: List of detections from predict_image()
-        threshold: Confidence threshold for display
-        save_path: S3 path to save visualization (e.g., s3://bucket/key.png)
-    """
-    # load imag from s3 or local path
-    if image_path.startswith('s3://'):
-        bucket_key = image_path.replace('s3://', '').split('/', 1)
-        bucket_name = bucket_key[0]
-        s3_key = bucket_key[1]
-        
-        s3_client = boto3.client('s3')
-        response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
-        
-        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-            tmp_file.write(response['Body'].read())
-            img = mpimg.imread(tmp_file.name)
-        os.unlink(tmp_file.name)
-    else:
-        img = mpimg.imread(image_path)
-    
-    plt.figure(figsize=[12, 8])
-    plt.imshow(img)
-    
-    width = img.shape[1]
-    height = img.shape[0]
-    colors = {}
-    num_detections = 0
-    
-    for det in detections:
-        if len(det) < 6:
-            continue
-            
-        klass, score, x0, y0, x1, y1 = det
-        
-        if score < threshold:
-            continue
-            
-        num_detections += 1
-        cls_id = int(klass)
-        
-        # generate random color for each class
-        if cls_id not in colors:
-            colors[cls_id] = (random.random(), random.random(), random.random())
-        
-        # convert normalized coordinates to pixel coordinates
-        xmin = int(x0 * width)
-        ymin = int(y0 * height)
-        xmax = int(x1 * width)
-        ymax = int(y1 * height)
-        
-        # draw bounding box
-        rect = plt.Rectangle(
-            (xmin, ymin),
-            xmax - xmin,
-            ymax - ymin,
-            fill=False,
-            edgecolor=colors[cls_id],
-            linewidth=3.5
-        )
-        plt.gca().add_patch(rect)
-        
-        # add confidence score
-        plt.gca().text(
-            xmin,
-            ymin - 2,
-            f"{score:.3f}",
-            bbox=dict(facecolor=colors[cls_id], alpha=0.5),
-            fontsize=12,
-            color="white"
-        )
-    
-    plt.title(f"Plastic Bag Detection - {num_detections} detections found")
-    plt.axis('off')
-    
-    if save_path:
-        if save_path.startswith('s3://'):
-            # save to s3
-            bucket_key = save_path.replace('s3://', '').split('/', 1)
-            bucket_name = bucket_key[0]
-            s3_key = bucket_key[1]
-            
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
-                plt.savefig(tmp_file.name, bbox_inches='tight', dpi=150)
-                tmp_file_path = tmp_file.name
-            
-            try:
-                s3_client = boto3.client('s3')
-                s3_client.upload_file(tmp_file_path, bucket_name, s3_key)
-                print(f"Visualization saved to: {save_path}")
-                os.unlink(tmp_file_path)
-            except Exception as e:
-                print(f"Error uploading to S3: {e}")
-                os.unlink(tmp_file_path)
-        else:
-            plt.savefig(save_path, bbox_inches='tight', dpi=150)
-            print(f"Visualization saved to: {save_path}")
-    
-    plt.close()
-    print(f"Number of detections: {num_detections}")
 
 
 
@@ -232,10 +126,145 @@ def encode_image_to_base64(image_path: str) -> str:
         raise Exception(f"Error reading image: {e}")
 
 
-def convert_detections_format(detections: List[Dict]) -> List[Tuple]:
-    """Convert batch inference detections to visualization format"""
-    converted = []
+
+
+
+def create_visualization(
+    image_path: str,
+    detections: Union[List[Tuple], List[Dict]],
+    threshold: float = 0.3,
+    save_path: Optional[str] = None,
+    title: str = "Object Detection"
+) -> bool:
+    """
+    Unified function to visualize detections on image with support for multiple formats.
     
+    Args:
+        image_path: Path to image file (local or S3 path like s3://bucket/key)
+        detections: List of detections either as:
+            - List[Dict]: With keys 'class_id', 'final_confidence', 'bbox_corners' (pixel coords)
+            - List[Tuple]: Format (class_id, confidence, x0_norm, y0_norm, x1_norm, y1_norm)
+        threshold: Confidence threshold for display (default: 0.3)
+        save_path: Optional path to save visualization (local or S3)
+        title: Title for the visualization (default: "Object Detection")
+    
+    Returns:
+        bool: True if successful, False if error occurred
+    """
+    fig = None
+    temp_files = []
+    
+    try:
+        # Load image from S3 or local path
+        img = load_image_from_path(image_path, temp_files)
+        
+        # Get image dimensions
+        height, width = img.shape[0], img.shape[1]
+        
+        # Convert detections to unified format if needed
+        normalized_detections = normalize_detection_format(detections, width, height)
+        
+        # Create visualization
+        fig, ax = plt.subplots(figsize=[12, 8])
+        ax.imshow(img)
+        
+        # Draw detections
+        num_detections = draw_detections(ax, normalized_detections, width, height, threshold)
+        
+        # Set title and formatting
+        ax.set_title(f"{title} - {num_detections} detections found")
+        ax.axis('off')
+        
+        # Save if path provided
+        if save_path:
+            save_success = save_figure(fig, save_path, temp_files)
+            if save_success:
+                print(f"Visualization saved to: {save_path}")
+            else:
+                print(f"Failed to save visualization to: {save_path}")
+        
+        print(f"Number of detections: {num_detections}")
+        return True
+        
+    except Exception as e:
+        print(f"Error in visualization: {e}")
+        return False
+        
+    finally:
+        # Clean up
+        if fig is not None:
+            plt.close(fig)
+        for temp_file in temp_files:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+
+def load_image_from_path(image_path: str, temp_files: List[str]) -> np.ndarray:
+    """
+    Load image from S3 or local path.
+    
+    Args:
+        image_path: Path to image (local or S3)
+        temp_files: List to track temporary files for cleanup
+    
+    Returns:
+        numpy array of the image
+    """
+    if image_path.startswith('s3://'):
+        # Parse S3 path
+        path_parts = image_path.replace('s3://', '').split('/', 1)
+        bucket_name = path_parts[0]
+        s3_key = path_parts[1] if len(path_parts) > 1 else ''
+        
+        # Get file extension from the S3 key
+        file_ext = os.path.splitext(s3_key)[1] if s3_key else '.jpg'
+        if not file_ext:
+            file_ext = '.jpg'  # Default to .jpg if no extension
+        
+        # Download from S3
+        s3_client = boto3.client('s3')
+        response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
+        
+        # Save to temporary file with correct extension
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
+            tmp_file.write(response['Body'].read())
+            temp_files.append(tmp_file.name)
+            return mpimg.imread(tmp_file.name)
+    else:
+        # Load from local path
+        return mpimg.imread(image_path)
+
+
+def normalize_detection_format(
+    detections: Union[List[Tuple], List[Dict]], 
+    image_width: int, 
+    image_height: int
+    ) -> List[Tuple]:
+    """
+    Convert detections to normalized tuple format.
+    
+    Args:
+        detections: Input detections in either format
+        image_width: Width of the image
+        image_height: Height of the image
+    
+    Returns:
+        List of tuples: (class_id, confidence, x0_norm, y0_norm, x1_norm, y1_norm)
+    """
+    if not detections:
+        return []
+    
+    # Check if already in tuple format
+    if isinstance(detections[0], tuple):
+        # Validate tuple format
+        validated = []
+        for det in detections:
+            if len(det) >= 6:
+                validated.append(det)
+        return validated
+    
+    # Convert from dict format
+    converted = []
     for det in detections:
         class_id = det.get('class_id', 0)
         confidence = det.get('final_confidence', 0)
@@ -244,13 +273,13 @@ def convert_detections_format(detections: List[Dict]) -> List[Tuple]:
         if len(bbox_corners) >= 4:
             x1, y1, x2, y2 = bbox_corners[:4]
             
-            # convert to normalized coordinates (assuming 640x640 input)
-            x0_norm = x1 / 640.0
-            y0_norm = y1 / 640.0
-            x1_norm = x2 / 640.0
-            y1_norm = y2 / 640.0
+            # Convert pixel coordinates to normalized coordinates
+            x0_norm = x1 / image_width
+            y0_norm = y1 / image_height
+            x1_norm = x2 / image_width
+            y1_norm = y2 / image_height
             
-            # keep within bounds
+            # Clamp to [0, 1] range
             x0_norm = max(0, min(1, x0_norm))
             y0_norm = max(0, min(1, y0_norm))
             x1_norm = max(0, min(1, x1_norm))
@@ -261,99 +290,121 @@ def convert_detections_format(detections: List[Dict]) -> List[Tuple]:
     return converted
 
 
-def create_visualization(
-    image_s3_path: str,
-    detections: List[Dict],
-    save_s3_path: str,
-    threshold: float = 0.3
-    ) -> bool:
-    """Create one visualization and save to S3"""
+def draw_detections(
+    ax: plt.Axes,
+    detections: List[Tuple],
+    width: int,
+    height: int,
+    threshold: float
+    ) -> int:
+    """
+    Draw bounding boxes and confidence scores on the axes.
     
+    Args:
+        ax: Matplotlib axes object
+        detections: Normalized detections
+        width: Image width in pixels
+        height: Image height in pixels
+        threshold: Confidence threshold
+    
+    Returns:
+        Number of detections drawn
+    """
+    colors = {}
+    num_detections = 0
+    
+    for det in detections:
+        if len(det) < 6:
+            continue
+        
+        class_id, score, x0, y0, x1, y1 = det
+        
+        # Ensure score is a valid number for comparison
+        try:
+            score = float(score)
+        except (ValueError, TypeError):
+            continue  # Skip invalid detections
+        
+        if score < threshold:
+            continue
+        
+        num_detections += 1
+        cls_id = int(class_id)
+        
+        # Generate consistent random color for each class
+        if cls_id not in colors:
+            # Use a seed for consistent colors across runs
+            random.seed(cls_id)
+            colors[cls_id] = (random.random(), random.random(), random.random())
+        
+        # Convert normalized coordinates to pixel coordinates
+        xmin = int(x0 * width)
+        ymin = int(y0 * height)
+        xmax = int(x1 * width)
+        ymax = int(y1 * height)
+        
+        # Draw bounding box
+        rect = plt.Rectangle(
+            (xmin, ymin),
+            xmax - xmin,
+            ymax - ymin,
+            fill=False,
+            edgecolor=colors[cls_id],
+            linewidth=3.5
+        )
+        ax.add_patch(rect)
+        
+        # Add confidence score label
+        ax.text(
+            xmin,
+            ymin - 2,
+            f"{score:.3f}",
+            bbox=dict(facecolor=colors[cls_id], alpha=0.5),
+            fontsize=12,
+            color="white"
+        )
+    
+    return num_detections
+
+
+def save_figure(fig: plt.Figure, save_path: str, temp_files: List[str]) -> bool:
+    """
+    Save figure to local path or S3.
+    
+    Args:
+        fig: Matplotlib figure object
+        save_path: Path to save (local or S3)
+        temp_files: List to track temporary files
+    
+    Returns:
+        bool: Success status
+    """
     try:
-        # Load image from S3
-        bucket_name = image_s3_path.split('/')[2]
-        s3_key = '/'.join(image_s3_path.split('/')[3:])
-        
-        s3_client = boto3.client('s3')
-        response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
-        
-        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-            tmp_file.write(response['Body'].read())
-            img = mpimg.imread(tmp_file.name)
-        os.unlink(tmp_file.name)
-        
-        # Convert detections
-        converted_detections = convert_detections_format(detections)
-        
-        # Create plot
-        fig, ax = plt.subplots(figsize=[12, 8])
-        ax.imshow(img)
-        
-        width = img.shape[1]
-        height = img.shape[0]
-        colors = {}
-        num_detections = 0
-        
-        for det in converted_detections:
-            klass, score, x0, y0, x1, y1 = det
+        if save_path.startswith('s3://'):
+            # Save to S3
+            path_parts = save_path.replace('s3://', '').split('/', 1)
+            bucket_name = path_parts[0]
+            s3_key = path_parts[1] if len(path_parts) > 1 else ''
             
-            if score < threshold:
-                continue
+            # Save to temporary file first
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                fig.savefig(tmp_file.name, bbox_inches='tight', dpi=150)
+                temp_files.append(tmp_file.name)
                 
-            num_detections += 1
-            cls_id = int(klass)
+                # Upload to S3
+                s3_client = boto3.client('s3')
+                s3_client.upload_file(tmp_file.name, bucket_name, s3_key)
             
-            if cls_id not in colors:
-                colors[cls_id] = (random.random(), random.random(), random.random())
+            return True
+        else:
+            # Save to local path
+            fig.savefig(save_path, bbox_inches='tight', dpi=150)
+            return True
             
-            # Convert to pixel coordinates
-            xmin = int(x0 * width)
-            ymin = int(y0 * height)
-            xmax = int(x1 * width)
-            ymax = int(y1 * height)
-            
-            # Draw box
-            rect = plt.Rectangle(
-                (xmin, ymin),
-                xmax - xmin,
-                ymax - ymin,
-                fill=False,
-                edgecolor=colors[cls_id],
-                linewidth=3.5
-            )
-            ax.add_patch(rect)
-            
-            # Add text
-            ax.text(
-                xmin,
-                ymin - 2,
-                f"{score:.3f}",
-                bbox=dict(facecolor=colors[cls_id], alpha=0.5),
-                fontsize=12,
-                color="white"
-            )
-        
-        ax.set_title(f"Detections: {num_detections} found")
-        ax.axis('off')
-        
-        # Save to S3
-        save_bucket_name = save_s3_path.split('/')[2]
-        save_s3_key = '/'.join(save_s3_path.split('/')[3:])
-        
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
-            fig.savefig(tmp_file.name, bbox_inches='tight', dpi=150)
-            tmp_file_path = tmp_file.name
-        
-        s3_client.upload_file(tmp_file_path, save_bucket_name, save_s3_key)
-        os.unlink(tmp_file_path)
-        plt.close(fig)
-        
-        return True
-        
     except Exception as e:
-        print(f"Error creating visualization: {e}")
-        plt.close('all')  # Clean up any open figures
+        print(f"Error saving figure: {e}")
         return False
+
 
 
 def save_batch_inference_results_to_s3(
@@ -375,7 +426,7 @@ def save_batch_inference_results_to_s3(
     s3_client = boto3.client('s3')
     
     # generate timestamp for folder name
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = GLOBAL_TIMESTAMP
     
     # create S3 key
     s3_key = f"{base_folder}/{timestamp}/output.json"
@@ -471,11 +522,11 @@ def save_batch_inference_visualizations(
     ) -> List[str]:
     """Save all visualizations - simple, one by one"""
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = GLOBAL_TIMESTAMP
     visualization_keys = []
     
-    print(f"\n🎨 Creating visualizations...")
-    print(f"📁 Saving to: s3://{s3_bucket}/yolo-pipeline/Inference/{timestamp}/Images/")
+    print(f"\nCreating visualizations...")
+    print(f"Saving to: s3://{s3_bucket}/yolo-pipeline/Inference/{timestamp}/Images/")
     
     for i, result in enumerate(batch_results):
         image_id = result.get('image_id', 'unknown')
@@ -499,17 +550,18 @@ def save_batch_inference_visualizations(
         success = create_visualization(
             original_image_s3_path,
             detections,
-            vis_s3_path,
-            confidence_threshold
+            confidence_threshold,
+            vis_s3_path
         )
         
         if success:
             visualization_keys.append(vis_s3_key)
-            print(f"  [{i+1}] ✅ {image_id}: saved")
+            print(f"  [{i+1}] {image_id}: saved")
         else:
-            print(f"  [{i+1}] ❌ {image_id}: failed")
+            print(f"  [{i+1}] {image_id}: failed")
     
-    print(f"\n📊 Created {len(visualization_keys)} visualizations")
+    print(f"\n Created {len(visualization_keys)} visualizations")
+    print("*"*50)
     return visualization_keys
 
 
