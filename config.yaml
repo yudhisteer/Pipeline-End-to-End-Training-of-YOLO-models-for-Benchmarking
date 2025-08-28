@@ -222,12 +222,6 @@ validation:
 
 # Deployment Configuration
 deployment:
-  mode: lambda # lambda or endpoint or serverless
-  endpoint_name: "yolo-endpoint-object-detection-v17"
-  default_job_name: "pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB"
-  model_package_name: "yolo-model-package-object-detection"
-  
-  # Lambda Configuration
   lambda:
     function_name: "yolo-inference-function"
     stack_name: "yolo-inference-stack"
@@ -247,33 +241,22 @@ deployment:
         - "application/octet-stream"
       tracing_enabled: true
     
-    # S3 bucket access
-    s3_bucket_access:
-      - "cyudhist-pipeline-yolo-503561429929"
-  
-  # SageMaker Endpoint Configuration (for fallback)
-  sagemaker:
-    instance_type: "ml.m5.12xlarge"
-    model_server:
-      timeout: 3600
-      workers: 1
-      response_timeout: 900
-    initial_instance_count: 1
-    auto_scaling_enabled: false
-  
-  enabled: true
-  auto_delete: false
 
 # Inference Configuration
 inference:
-  model_data: "s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/models/20250819-220843/pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB/output/model.tar.gz"
+  # choose either model_data or job_name
+  model_data: "s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/models/20250819-220843/pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB/output/model.tar.gz" # used for local inference
   job_name: "pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB"
-  metric_key: "recall"
+
+  # S3 inference dataset
+  s3_inference_dataset: "s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/val/images"
+  batch_size: 5
   
-  # Default inference parameters (can be overridden at runtime)
+  # Default inference parameters
   confidence_threshold: 0.7
   iou_threshold: 0.5
   max_image_size: 640
+  metric_key: "recall"
   
   # Supported file formats
   supported_formats: [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"]
@@ -303,14 +286,11 @@ inference:
     metrics_enabled: true
   
   # Test configuration
-  test:
+  local_test:
     image_path: "dataset/yolo-dataset/val/images/000000013546.jpg"
 
-    # Batch test settings
-    s3_bucket: "cyudhist-pipeline-yolo-503561429929"
-    s3_prefix: "yolo-pipeline/yolo-dataset/val/images" #change to s3_test_dataset
-    batch_size: 5  # Number of images to test
   
+
   # Visualization configuration
   visualization:
     figure_size: [12, 8]
@@ -372,52 +352,6 @@ evaluation:
       model_archive: "model.tar.gz"             # Temporary file for downloading model artifacts
       model_extract_dir: "./models"            # Directory for extracting and storing models
 
-# Lambda Deployment Tools Configuration
-lambda_tools:
-  # SAM (Serverless Application Model) configuration
-  sam:
-    template_path: "src/sagemaker/lambda/yolo-inference/template.yaml"
-    build_dir: "src/sagemaker/lambda/yolo-inference/.aws-sam"
-    package_dir: "src/sagemaker/lambda/yolo-inference/packaged"
-    
-    # Build configuration
-    build:
-      use_container: true          # Use Docker container for building
-      parallel: true               # Enable parallel builds
-      cached: true                 # Use cached layers
-    
-    # Deploy configuration
-    deploy:
-      guided: false                # Non-interactive deployment
-      confirm_changeset: false     # Auto-confirm changes
-      capabilities: ["CAPABILITY_IAM", "CAPABILITY_NAMED_IAM"]
-      parameter_overrides:
-        - "FunctionName=yolo-inference-function"
-        - "StackName=yolo-inference-stack"
-  
-  # Docker configuration for Lambda
-  docker:
-    base_image: "public.ecr.aws/lambda/python:3.9"
-    requirements_file: "src/sagemaker/lambda/yolo-inference/requirements.txt"
-    dockerfile_path: "src/sagemaker/lambda/yolo-inference/Dockerfile"
-    
-    # Build settings
-    build_args:
-      - "BUILDKIT_INLINE_CACHE=1"
-    no_cache: false
-    pull: true
-  
-  # Local testing configuration
-  local_testing:
-    sam_local: true               # Use SAM local for testing
-    port: 3000                    # Local port for testing
-    host: "127.0.0.1"
-    warm_containers: 1            # Number of warm containers
-    debug: true                   # Enable debug mode
-
-  # CloudWatch Configuration
-  cloudwatch:
-    namespace: "YOLO-Training-Metrics"  # CloudWatch namespace for metrics
 
 # Runtime Configuration
 runtime:

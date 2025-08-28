@@ -1,21 +1,12 @@
 """
 Script to test YOLO Lambda inference
 """
-import json
-import boto3
-from datetime import datetime
-from typing import Dict, List, Any
+
 import requests
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
-import boto3
-import tempfile
-import os
-import random
 
 
     
-from utils.utils_config import load_config, get_lambda_config
+from utils.utils_config import load_config, get_inference_config
 from utils.utils_inference import get_s3_images, save_results_and_visualizations
 
 
@@ -34,17 +25,29 @@ def test_health_check(base_url: str, health_endpoint: str = '/health') -> bool:
 
 
 def run_batch_inference(
-    s3_bucket: str, 
-    s3_prefix: str, 
+    s3_inference_dataset: str, 
     base_url: str, 
     confidence_threshold: float, 
     predict_endpoint: str, 
     num_images: int = 5,
     save_to_s3: bool = True,
-    ) -> bool:
-
-    """YOLO batch inferenc"""
+) -> bool:
+    """YOLO batch inference"""
     print(f"\nTesting YOLO batch inference with up to {num_images} real images from S3...")
+    
+    # extract bucket and prefix from S3 path
+    s3_path = s3_inference_dataset[5:]  # remove 's3://'
+    parts = s3_path.split('/', 1)
+    
+    if len(parts) < 2:
+        print(f"Invalid S3 path format: {s3_inference_dataset}")
+        return False
+    
+    s3_bucket = parts[0]
+    s3_prefix = parts[1]
+    
+    print(f"Using S3 bucket: {s3_bucket}")
+    print(f"Using S3 prefix: {s3_prefix}")
     
     # get image files
     image_files = get_s3_images(s3_bucket, s3_prefix, num_images)
@@ -137,19 +140,17 @@ def run_batch_inference(
 
 
 
-
-
-
 def main():
     
     # load configs
     config = load_config("config.yaml")
-    lambda_config = get_lambda_config(config)
-    
-    # test api local or prod
+    inference_config = get_inference_config(config)
+    lambda_config = inference_config.get('lambda', {})
     base_url = lambda_config['base_url'] # prod url
-
-    confidence_threshold = lambda_config['confidence_threshold']
+    confidence_threshold = inference_config['confidence_threshold']
+    batch_size = inference_config['batch_size']
+    s3_inference_dataset = inference_config['s3_inference_dataset']
+    predict_endpoint = lambda_config['endpoints']['predict']
     
     # 1. Test health check first
     if not test_health_check(base_url, '/health'):
@@ -157,17 +158,15 @@ def main():
     print("Health check passed!")
     
     # 2. run batch inference
-    test_config = config.get('inference', {}).get('test', {})
-    success_batch = run_batch_inference(
-        test_config.get('s3_bucket'),
-        test_config.get('s3_prefix'), 
-        base_url,
-        confidence_threshold,
-        lambda_config.get('predict_endpoint', '/predict'),
-        test_config.get('batch_size', 5),
+    success = run_batch_inference(
+        s3_inference_dataset=s3_inference_dataset,
+        base_url=base_url,
+        confidence_threshold=confidence_threshold,
+        predict_endpoint=predict_endpoint,
+        num_images=batch_size,
         save_to_s3=True,
     )
-    print(f"\nResults: Batch={success_batch}")
+    print(f"\nResults: Batch={success}")
 
 if __name__ == "__main__":
     main()
