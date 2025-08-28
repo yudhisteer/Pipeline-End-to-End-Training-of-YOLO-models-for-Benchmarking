@@ -15,7 +15,8 @@ from ultralytics import YOLO
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.utils_config import (
-    load_inference_config
+    load_config,
+    get_inference_config
 )
 from utils.utils_pipelines import (
     get_model_from_registry,
@@ -35,7 +36,8 @@ from utils.utils_inference import (
 
 
 # global configuration
-INFERENCE_CONFIG = load_inference_config()
+config = load_config()
+INFERENCE_CONFIG = get_inference_config(config)
 DEFAULT_CONFIDENCE = INFERENCE_CONFIG['confidence_threshold']
 DEFAULT_IOU_THRESHOLD = INFERENCE_CONFIG['iou_threshold']
 
@@ -371,7 +373,7 @@ if __name__ == "__main__":
         exit(1)
     
     # Test with a sample image from config
-    test_image_path = INFERENCE_CONFIG.get('test_image_path', '')
+    test_image_path = INFERENCE_CONFIG.get('local_test', {}).get('image_path', '')
     
     if not test_image_path:
         print("Warning: test_image_path not configured in inference config")
