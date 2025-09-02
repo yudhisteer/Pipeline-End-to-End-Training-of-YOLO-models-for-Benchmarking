@@ -219,6 +219,7 @@ def get_deployment_config(config: Dict[str, Any]) -> Dict[str, Any]:
     deployment = config.get('deployment', {})
 
     return {
+        'job_name': deployment.get('job_name', {}),
         'lambda': deployment.get('lambda', {})
     }
 
