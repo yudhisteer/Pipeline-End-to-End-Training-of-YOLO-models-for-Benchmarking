@@ -3,3 +3,4 @@ pillow
 onnxruntime
 numpy
 boto3
+pyyaml

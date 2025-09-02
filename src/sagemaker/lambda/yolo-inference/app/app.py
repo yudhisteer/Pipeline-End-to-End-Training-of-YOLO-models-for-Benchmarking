@@ -7,40 +7,142 @@ import io
 import base64
 import os
 import tempfile
+import tarfile
+import yaml
+from urllib.parse import urlparse
+from typing import Dict, Any
+
+
+def get_training_job_model_path(job_name: str) -> str:
+    """
+    Get the model path for a specific training job.
+    """
+    job_details = get_training_job_details(job_name)
+    
+    if job_details is None:
+        raise ValueError(f"Training job '{job_name}' not found or could not be retrieved")
+    
+    if "ModelArtifacts" not in job_details:
+        raise ValueError(f"Training job '{job_name}' does not have ModelArtifacts")
+    
+    if "S3ModelArtifacts" not in job_details["ModelArtifacts"]:
+        raise ValueError(f"Training job '{job_name}' does not have S3ModelArtifacts")
+    
+    return job_details["ModelArtifacts"]["S3ModelArtifacts"]
+
+
+def get_training_job_details(job_name: str) -> dict:
+    """
+    Get details for a specific training job.
+
+    Args:
+        job_name: Name of the training job
+
+    Returns:
+        Dict containing job details or None if not found
+    """
+    try:
+        sm = boto3.client("sagemaker")
+        return sm.describe_training_job(TrainingJobName=job_name)
+    except Exception as e:
+        print(f"Error: Training job '{job_name}' not found: {e}")
+        return None
+
+
+def load_config() -> Dict[str, Any]:
+    """Load configuration from config.yaml"""
+    try:
+        config_path = 'config.yaml'  # config.yaml is copied to container root by Dockerfile
+        with open(config_path, 'r') as file:
+            config = yaml.safe_load(file)
+        return config
+    except FileNotFoundError:
+        print("Warning: config.yaml not found, using environment variables")
+        return {}
+    except Exception as e:
+        print(f"Error loading config.yaml: {e}")
+        return {}
+
+def get_deployment_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Get deployment configuration"""
+    deployment = config.get('deployment', {})
+
+    return {
+        'job_name': deployment.get('job_name', {}),
+        'lambda': deployment.get('lambda', {})
+    }
+
+
+# Load configuration from config.yaml
+config = load_config()
+deployment_config = get_deployment_config(config)
+job_name = deployment_config.get('job_name')
+
 
 # Initialize S3 client
 s3_client = boto3.client('s3')
 
 # Global variables for model (loaded once per container)
 model_session = None
-MODEL_S3_BUCKET = "cyudhist-pipeline-yolo-503561429929"
-MODEL_S3_KEY = "yolo-pipeline/onnx-models/best.onnx"
 
-def load_model():
-    """Load ONNX model from S3"""
+
+def load_model(job_name: str):
+    """Load ONNX model from S3 tar.gz file"""
     global model_session
     
     if model_session is None:
-        print("Loading ONNX model from S3...")
+        print("Loading ONNX model from S3 tar.gz...")
+        model_path = get_training_job_model_path(job_name)
+        # Parse S3 path to get bucket and key
+        parsed_url = urlparse(model_path)
+        model_s3_bucket = parsed_url.netloc
+        model_s3_key = parsed_url.path.lstrip('/')
         
-        # Create temporary file
-        with tempfile.NamedTemporaryFile(suffix='.onnx', delete=False) as tmp_file:
-            # Download model from S3
+        # Create temporary files
+        with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as tar_tmp_file:
+            # Download tar.gz file from S3
+            print(f"Downloading {model_s3_bucket}/{model_s3_key}")
             s3_client.download_fileobj(
-                MODEL_S3_BUCKET,
-                MODEL_S3_KEY, 
-                tmp_file
+                model_s3_bucket,
+                model_s3_key, 
+                tar_tmp_file
             )
-            tmp_file.flush()
+            tar_tmp_file.flush()
             
-            # Load ONNX model
-            model_session = ort.InferenceSession(
-                tmp_file.name,
-                providers=['CPUExecutionProvider']  # Lambda only supports CPU
-            )
-            
-            # Clean up temp file
-            os.unlink(tmp_file.name)
+            # Extract best.onnx from tar.gz
+            with tempfile.NamedTemporaryFile(suffix='.onnx', delete=False) as onnx_tmp_file:
+                try:
+                    with tarfile.open(tar_tmp_file.name, 'r:gz') as tar:
+                        # Look for best.onnx in the tar file
+                        best_onnx_member = None
+                        for member in tar.getmembers():
+                            if member.name.endswith('best.onnx') or member.name == 'best.onnx':
+                                best_onnx_member = member
+                                break
+                        
+                        if best_onnx_member is None:
+                            raise FileNotFoundError("best.onnx not found in the tar.gz file")
+                        
+                        print(f"Found {best_onnx_member.name} in tar.gz")
+                        
+                        # Extract best.onnx to temporary file
+                        extracted_file = tar.extractfile(best_onnx_member)
+                        if extracted_file is None:
+                            raise RuntimeError(f"Could not extract {best_onnx_member.name}")
+                        
+                        onnx_tmp_file.write(extracted_file.read())
+                        onnx_tmp_file.flush()
+                        
+                        # Load ONNX model
+                        model_session = ort.InferenceSession(
+                            onnx_tmp_file.name,
+                            providers=['CPUExecutionProvider']  # Lambda only supports CPU
+                        )
+                        
+                finally:
+                    # Clean up temp files
+                    os.unlink(tar_tmp_file.name)
+                    os.unlink(onnx_tmp_file.name)
             
         print("Model loaded successfully!")
         print(f"Model inputs: {[input.name for input in model_session.get_inputs()]}")
@@ -48,7 +150,7 @@ def load_model():
     
     return model_session
 
-def preprocess_image(image_data, target_size=(640, 640)):
+def preprocess_image(image_data: str, target_size: tuple[int, int] = (640, 640)) -> np.ndarray:
     """Preprocess image for YOLO inference"""
     # Convert base64 to PIL Image if needed
     if isinstance(image_data, str):
@@ -75,7 +177,7 @@ def preprocess_image(image_data, target_size=(640, 640)):
     
     return img_array
 
-def postprocess_predictions(predictions, confidence_threshold=0.5):
+def postprocess_predictions(predictions: np.ndarray, confidence_threshold: float) -> list[dict]:
     """Post-processing of YOLO predictions"""
     detections = []
     
@@ -181,56 +283,13 @@ def postprocess_predictions(predictions, confidence_threshold=0.5):
     
     return detections
 
-def process_single_image(body, model):
-    """Process single image (existing logic)"""
-    # Handle different input methods
-    if 'image_base64' in body:
-        image_data = body['image_base64']
-    elif 's3_bucket' in body and 's3_key' in body:
-        response = s3_client.get_object(Bucket=body['s3_bucket'], Key=body['s3_key'])
-        image_data = response['Body'].read()
-    else:
-        return {
-            'statusCode': 400,
-            'body': json.dumps({
-                'error': 'No image provided. Send image_base64 or s3_bucket/s3_key'
-            })
-        }
-    
-    # Preprocess and run inference
-    input_array = preprocess_image(image_data)
-    input_name = model.get_inputs()[0].name
-    predictions = model.run(None, {input_name: input_array})
-    
-    # Debug: print prediction info
-    print(f"Number of outputs: {len(predictions)}")
-    for i, pred in enumerate(predictions):
-        print(f"Output {i} shape: {pred.shape}")
-    
-    confidence_threshold = body.get('confidence_threshold', 0.5)
-    detections = postprocess_predictions(predictions, confidence_threshold)
-    
-    return {
-        'statusCode': 200,
-        'headers': {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*'
-        },
-        'body': json.dumps({
-            'detections': detections,
-            'num_detections': len(detections),
-            'model_info': {
-                'input_shape': [input.shape for input in model.get_inputs()],
-                'output_shape': [output.shape for output in model.get_outputs()]
-            }
-        })
-    }
-
-def process_batch_images(body, model):
+def process_batch_images(body: dict, model: ort.InferenceSession) -> dict:
     """Process multiple images in batch"""
+
+    # Get parameters from body
+    confidence_threshold = body.get('confidence_threshold')
+    chunk_size = body.get('chunk_size')
     images = body.get('images', [])
-    confidence_threshold = body.get('confidence_threshold', 0.5)
-    chunk_size = body.get('chunk_size', 10)  # Process 10 images at a time
     
     if not images:
         return {
@@ -263,7 +322,7 @@ def process_batch_images(body, model):
         })
     }
 
-def process_image_chunk(image_chunk, model, confidence_threshold):
+def process_image_chunk(image_chunk: list[dict], model: ort.InferenceSession, confidence_threshold: float) -> list[dict]:
     """Process a chunk of images"""
     chunk_results = []
     print(f"DEBUG: Starting batch processing")
@@ -305,7 +364,9 @@ def process_image_chunk(image_chunk, model, confidence_threshold):
     
     return chunk_results
 
-def lambda_handler(event, context):
+
+
+def lambda_handler(event: dict, context: dict) -> dict:
     """Main Lambda handler"""
     try:
         # Handle health check
@@ -322,8 +383,8 @@ def lambda_handler(event, context):
                 })
             }
         
-        # Load model (happens once per container)
-        model = load_model()
+        # 1. Load model (happens once per container)
+        model = load_model(job_name)
         
         # Parse request body for POST requests
         body = None
@@ -349,13 +410,10 @@ def lambda_handler(event, context):
                 })
             }
         
-        # Check for batch vs single image processing
-        if 'images' in body:
-            # Batch processing
-            return process_batch_images(body, model)
-        else:
-            # Single image processing
-            return process_single_image(body, model)
+        # 2. Batch processing
+        results = process_batch_images(body, model)
+
+        return results
         
     except Exception as e:
         print(f"Error: {str(e)}")

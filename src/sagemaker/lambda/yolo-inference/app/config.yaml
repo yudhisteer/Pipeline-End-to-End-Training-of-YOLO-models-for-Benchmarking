@@ -1,0 +1,359 @@
+# SageMaker Training Configuration for YOLO Models
+
+# AWS Configuration
+aws:
+  bucket: "cyudhist-pipeline-yolo-503561429929"
+  prefix: "yolo-pipeline"
+  role_arn: ${ROLE_ARN}
+  region: "us-east-1"
+
+
+# Data Configuration(retired)
+# data_local:
+#   dataset_dir: dataset/yolo-dataset
+#   train_dir: dataset/yolo-dataset/train
+#   val_dir: dataset/yolo-dataset/val
+#   s3_dataset_prefix: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/
+#   s3_train_prefix: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/
+#   s3_val_prefix: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/
+
+
+# Ground Truth Configuration
+ground_truth:
+  s3_bucket: "cyudhist-ground-truth-data-labeling"
+  job_id: "bounding_box"
+  ground_truth_job_name: "yolo-bbox-v1"
+  yolo_output_dir: "yolo_annot_files"
+  images_dir: "s3://cyudhist-ground-truth-data-labeling/bounding_box/images"
+  output_manifest_file: "s3://cyudhist-ground-truth-data-labeling/bounding_box/ground_truth_annots/yolo-bbox/manifests/output/output.manifest"
+  prod_s3_bucket: "cyudhist-pipeline-yolo-503561429929"
+  train_ratio: 0.8
+  random_seed: 42
+
+
+
+
+# Training Configuration
+# choose one of the following models:
+# yolo10
+#   - yolov10n.pt
+#   - yolov10s.pt
+#   - yolov10m.pt
+#   - yolov10b.pt
+#   - yolov10l.pt
+#   - yolov10x.pt
+
+# yolo11
+#   - yolo11n.pt
+#   - yolo11s.pt
+#   - yolo11m.pt
+#   - yolo11l.pt
+#   - yolo11x.pt
+
+# yolo12
+#   - yolo12n.pt
+#   - yolo12s.pt
+#   - yolo12m.pt
+#   - yolo12l.pt
+#   - yolo12x.pt
+# check pricing here: https://aws.amazon.com/sagemaker/ai/pricing/
+training:
+  s3_dataset_prefix: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/
+  s3_train_prefix: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/
+  s3_val_prefix: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/
+  models_dir: s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-models/
+  model_dir: ./runs/train
+  output_dir: ./output
+  model_name: yolo12n.pt
+  instance_type: ml.m5.2xlarge
+  instance_count: 1
+  volume_size: 30
+  max_run: 3600  # 1 hour max for testing
+
+
+  # Hyperparameters actually used in training (modify these to change what's used)
+  hyperparams:
+    imgsz: 640
+    epochs: 25
+    batch: 4
+    lr0: 0.001
+    optimizer: SGD
+
+
+
+# Reference: All Available YOLO Hyperparameters
+# Copy any of these to training.hyperparams above to use them
+# These are NOT used by the code - just for reference
+# https://docs.ultralytics.com/modes/train/#train-settings
+all_hyperparams_available:
+  imgsz: 640                   # Image size
+  epochs: 20                   # Number of epochs
+  batch: 4                     # Batch size
+  lr0: 0.01                    # Initial learning rate
+  lrf: 0.1                     # Final OneCycleLR learning rate (lr0 * lrf)
+  momentum: 0.937              # SGD momentum/Adam beta1
+  weight_decay: 0.0005         # Optimizer weight decay
+  warmup_epochs: 3.0           # Warmup epochs (fractions ok)
+  warmup_momentum: 0.8         # Warmup initial momentum
+  warmup_bias_lr: 0.1          # Warmup initial bias lr
+  cos_lr: true                 # Use cosine LR scheduler
+  optimizer: AdamW             # Optimizer (SGD, Adam, AdamW, auto)
+
+  # Data Augmentation
+  hsv_h: 0.015                 # Image HSV-Hue augmentation (fraction)
+  hsv_s: 0.7                   # Image HSV-Saturation augmentation (fraction)
+  hsv_v: 0.4                   # Image HSV-Value augmentation (fraction)
+  degrees: 10.0                # Image rotation (+/- deg)
+  translate: 0.1               # Image translation (+/- fraction)
+  scale: 0.5                   # Image scale (+/- gain)
+  shear: 0.0                   # Image shear (+/- deg)
+  perspective: 0.0             # Image perspective (+/- fraction)
+  flipud: 0.0                  # Image flip up-down (probability)
+  fliplr: 0.5                  # Image flip left-right (probability)
+  mosaic: 1.0                  # Image mosaic (probability)
+  mixup: 0.1                   # Image mixup (probability)
+  copy_paste: 0.0              # Segment copy-paste (probability)
+
+  # Loss Function Weights
+  box: 7.5                     # Box loss gain
+  cls: 0.5                     # Class loss gain
+  dfl: 1.5                     # DFL loss gain
+  fl_gamma: 0.0                # Focal loss gamma (EfficientDet style)
+  label_smoothing: 0.1         # Label smoothing (fraction)
+
+  # Advanced Training Options
+  patience: 50                 # EarlyStopping patience (epochs without improvement)
+  workers: 8                   # Max dataloader workers
+  dropout: 0.1                 # Use dropout regularization
+  save_period: -1              # Save checkpoint every x epochs (-1 = disabled)
+  seed: 0                      # Global training seed
+  deterministic: true          # Force deterministic training
+  single_cls: false            # Treat as single-class dataset
+  verbose: true                # Verbose output
+  amp: true                    # Automatic Mixed Precision training
+  fraction: 1.0                # Dataset fraction to train on
+  profile: false               # Profile ONNX and TensorRT speeds
+  freeze: null                 # Freeze layers (backbone, neck, head, etc.)
+  multi_scale: false           # Multi-scale training
+  overlap_mask: true           # Masks should overlap during training
+  mask_ratio: 4                # Mask downsample ratio
+
+  # Model-Specific Parameters
+  pretrained: true             # Use pretrained model
+  device: ''                   # CUDA device, i.e. 0 or 0,1,2,3 or cpu
+  dnn: false                   # Use OpenCV DNN for ONNX inference
+  half: false                  # Use FP16 half-precision inference
+  int8: false                  # Use INT8 quantization
+
+
+
+# Hyperparameter Tuning Configuration
+# https://docs.ultralytics.com/guides/hyperparameter-tuning/#best_hyperparametersyaml
+tuning:
+  enabled: false  # Keep disabled for initial testing
+  max_jobs:   # reduced for testing
+  max_parallel_jobs: 1
+  objective_metric: mAP_0.5
+  objective_type: Maximize
+  hyperparameter_ranges:
+    batch:
+      type: categorical
+      values: [2, 4, 8]  # smaller values for testing
+    imgsz:
+      type: categorical
+      values: [640, 864]  # smaller sizes for testing
+    lr0:
+      type: continuous
+      min: 0.001
+      max: 0.1
+    weight_decay:
+      type: continuous
+      min: 0.0001
+      max: 0.001
+    dropout:
+      type: continuous
+      min: 0.0
+      max: 0.3
+    hsv_h:
+      type: continuous
+      min: 0.0
+      max: 0.1
+    degrees:
+      type: continuous
+      min: 0.0
+      max: 20.0
+    box:
+      type: continuous
+      min: 5.0
+      max: 10.0
+    cls:
+      type: continuous
+      min: 0.3
+      max: 1.0
+    label_smoothing:
+      type: continuous
+      min: 0.0
+      max: 0.3
+    optimizer:
+      type: categorical
+      values: ["SGD", "Adam", "AdamW"]
+
+# Pipeline Configuration
+pipeline:
+  # Execution behavior
+  dry_run: false                   # Set to true to create pipeline without executing
+  enable_caching: false            # Enable step caching for faster re-runs
+  auto_approve_models: false       # Auto-approve registered models (use with caution)
+
+  name: "yolo-training-pipeline-object-detection"
+  training_step_name: "YOLOTrainingStep-ObjectDetection"
+  registration_step_name: "YOLOModelRegistrationStep-ObjectDetection"
+  model_package_group_name: "yolo-model-package-group-object-detection"
+
+# Model Validation Configuration
+validation:
+  # Model quality thresholds for SageMaker Model Registry
+  min_mAP_0_5: 0.3
+  min_precision: 0.5
+  min_recall: 0.4
+  max_model_size_mb: 500
+  max_inference_time_ms: 100
+
+
+# Deployment Configuration
+deployment:
+  job_name: "pipelines-lk3adydlw4vv-YOLOTrainingStep-Obj-y6StW68c37" # used for lambda serverless deployment
+
+  lambda:
+    function_name: "yolo-inference-function"
+    stack_name: "yolo-inference-stack"
+    memory_size: 10240  # 10GB memory for Docker Lambda
+    timeout: 300        # 5 minutes timeout
+    architecture: "x86_64"
+    package_type: "Image"
+    
+    # API Gateway configuration
+    api_gateway:
+      binary_media_types:
+        - "image/png"
+        - "image/jpg"
+        - "image/jpeg"
+        - "image/gif"
+        - "image/bmp"
+        - "application/octet-stream"
+      tracing_enabled: true
+    
+
+# Inference Configuration
+inference:
+  # choose either model_data or job_name - used for local inference
+  model_data: "s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/models/20250819-220843/pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB/output/model.tar.gz" # used for local inference
+  job_name: "pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB"
+
+  # S3 inference dataset
+  s3_inference_dataset: "s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/val/images"
+
+  # Default deployment-inference parameters
+  batch_size: 5
+  chunk_size: 10
+  imgsz: 640
+  confidence_threshold: 0.7
+  
+  # Supported file formats
+  supported_formats: [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"]
+  output_dir: "./output"
+  
+  # Lambda Runtime Configuration
+  lambda:
+    # API endpoints
+    base_url: "https://x37t6p8ybe.execute-api.us-east-1.amazonaws.com/Prod"
+    local_base_url: "http://127.0.0.1:3000"
+    endpoints:
+      health: "/health"
+      predict: "/predict"
+    
+    # Request configuration
+    request_timeout: 300
+    max_retries: 3
+    retry_delay: 1
+    
+    # Performance settings
+    warm_up_requests: 1
+    batch_processing: false
+    
+    # Monitoring
+    enable_cloudwatch_logs: true
+    log_level: "INFO"
+    metrics_enabled: true
+  
+  # Test configuration
+  local_test:
+    image_path: "dataset/yolo-dataset/val/images/000000013546.jpg"
+
+  
+  # Visualization configuration
+  visualization:
+    figure_size: [12, 8]
+    line_width: 3.5
+    font_size: 12
+    dpi: 150
+    show_confidence: true
+    show_class_names: true
+    box_thickness: 2
+    font_scale: 0.6
+    save_visualizations: true
+
+
+# Evaluation Configuration
+evaluation:
+  # Pipeline configuration
+  name: "yolo-evaluation-pipeline"
+  evaluation_step_name: "YOLOEvaluationStep"
+  
+  # Test dataset location (required)
+  s3_test_dataset: "s3://cyudhist-pipeline-yolo-503561429929/yolo-pipeline/yolo-dataset/"
+  
+  # successfull training job name
+  trained_model_job: "pipelines-bpblsxjiotwz-YOLOTrainingStep-Obj-S6s6poOKsB"
+  
+  # Baseline model to compare trained model with
+  yolo_baseline_model: "yolo12n"
+
+  # Compute configuration
+  instance_type: "ml.m5.xlarge"
+  instance_count: 1
+  volume_size: 30  # GB
+  max_runtime: 3600  # 1 hour
+  
+  # Evaluation metrics configuration
+  metrics:
+    confidence_threshold: 0.25
+    iou_threshold: 0.45
+    max_detections: 300
+  
+  # Output configuration
+  output:
+    save_predictions: true
+    save_visualizations: true
+
+
+
+  # Model Registry Configuration
+  registry:
+    max_results: 50                # Maximum number of models to retrieve from registry
+    max_results_display: 20        # Maximum number of models to display in list
+    evaluation_metrics_file: "evaluation_metrics.json"  # Name of metrics file in model artifacts
+    training_job_patterns:         # Patterns to identify training jobs in S3 paths
+      - "YOLOTraining"
+      - "pipelines-"
+    temp_files:
+      output_archive: "temp_output.tar.gz"      # Temporary file for downloading output artifacts
+      output_extract_dir: "temp_output_dir"     # Temporary directory for extracting output
+      model_archive: "model.tar.gz"             # Temporary file for downloading model artifacts
+      model_extract_dir: "./models"            # Directory for extracting and storing models
+
+
+# Runtime Configuration
+runtime:
+  wait_for_completion: true        # Wait for pipeline execution to complete
+  show_logs: true                  # Show CloudWatch logs during execution

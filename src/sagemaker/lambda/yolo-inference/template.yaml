@@ -32,6 +32,11 @@ Resources:
             BucketName: cyudhist-pipeline-yolo-503561429929
         - S3ReadPolicy:
             BucketName: "*"  # In case you need to read images from other buckets
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sagemaker:DescribeTrainingJob
+              Resource: "*"
       Environment:
         Variables:
           MODEL_S3_BUCKET: cyudhist-pipeline-yolo-503561429929
