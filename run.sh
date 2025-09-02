@@ -10,6 +10,10 @@ deploy_lambda() {
     echo "Copying config.yaml..."
     cp config.yaml src/sagemaker/lambda/yolo-inference/app/config.yaml
     
+    # Extract and print job_name from Lambda app config.yaml (deployment section)
+    job_name=$(grep -A 5 "deployment:" src/sagemaker/lambda/yolo-inference/app/config.yaml | grep "job_name:" | sed 's/.*job_name: *"\([^"]*\)".*/\1/')
+    echo "Job name: $job_name"
+    
     # Change to Lambda directory
     cd src/sagemaker/lambda/yolo-inference
     
@@ -33,6 +37,13 @@ run_inference() {
     echo "Inference completed!"
 }
 
+# Run YOLO training
+run_training() {
+    echo "Running YOLO training..."
+    python src/sagemaker/sagemaker_pipeline.py
+    echo "Training completed!"
+}
+
 # Call the appropriate function based on argument
 case "${1:-deploy}" in
     deploy)
@@ -40,6 +51,9 @@ case "${1:-deploy}" in
         ;;
     inference)
         run_inference
+        ;;
+    train)
+        run_training
         ;;
 esac
 
