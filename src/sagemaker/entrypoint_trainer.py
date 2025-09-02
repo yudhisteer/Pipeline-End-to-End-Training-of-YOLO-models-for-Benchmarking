@@ -262,7 +262,7 @@ class YOLOSageMakerTrainer:
 
             # Import here to avoid circular imports
             from sagemaker_metrics import display_training_job_metrics
-            display_training_job_metrics(training_job_name)
+            display_training_job_metrics(training_job_name, show_metrics=True)
 
         except ImportError as e:
             print(f"Could not import sagemaker_metrics: {e}")
@@ -470,7 +470,7 @@ class YOLOSageMakerTrainer:
             print(f"Training job: {training_job_name}")
             print("-" * 60)
             
-            display_training_job_metrics(training_job_name)
+            display_training_job_metrics(training_job_name, show_metrics=True)
             
         except ImportError as e:
             print(f"Could not import sagemaker_metrics: {e}")
