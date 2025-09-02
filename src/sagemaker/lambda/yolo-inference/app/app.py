@@ -10,74 +10,79 @@ import tempfile
 import tarfile
 import yaml
 from urllib.parse import urlparse
-from typing import Dict, Any
 
 
-def get_training_job_model_path(job_name: str) -> str:
+
+def get_model_artifacts_path(job_name: str) -> str:
     """
-    Get the model path for a specific training job.
-    """
-    job_details = get_training_job_details(job_name)
+    Get the S3 model artifacts path for a specific SageMaker training job.
     
-    if job_details is None:
-        raise ValueError(f"Training job '{job_name}' not found or could not be retrieved")
-    
-    if "ModelArtifacts" not in job_details:
-        raise ValueError(f"Training job '{job_name}' does not have ModelArtifacts")
-    
-    if "S3ModelArtifacts" not in job_details["ModelArtifacts"]:
-        raise ValueError(f"Training job '{job_name}' does not have S3ModelArtifacts")
-    
-    return job_details["ModelArtifacts"]["S3ModelArtifacts"]
-
-
-def get_training_job_details(job_name: str) -> dict:
-    """
-    Get details for a specific training job.
-
     Args:
-        job_name: Name of the training job
-
+        job_name: Name of the SageMaker training job
+        
     Returns:
-        Dict containing job details or None if not found
+        str: S3 path to model artifacts (model.tar.gz)
+        
+    Raises:
+        ValueError: If job not found or missing model artifacts
     """
     try:
+        # Get training job details from SageMaker
         sm = boto3.client("sagemaker")
-        return sm.describe_training_job(TrainingJobName=job_name)
+        job_details = sm.describe_training_job(TrainingJobName=job_name)
+        
+        # Extract model artifacts path
+        model_artifacts = job_details.get("ModelArtifacts", {})
+        s3_model_path = model_artifacts.get("S3ModelArtifacts")
+        
+        if not s3_model_path:
+            raise ValueError(f"Training job '{job_name}' does not have S3ModelArtifacts")
+            
+        print(f"Found model artifacts at: {s3_model_path}")
+        return s3_model_path
+        
     except Exception as e:
-        print(f"Error: Training job '{job_name}' not found: {e}")
-        return None
+        error_msg = f"Failed to get model artifacts for training job '{job_name}': {e}"
+        print(f"Error: {error_msg}")
+        raise ValueError(error_msg)
 
 
-def load_config() -> Dict[str, Any]:
-    """Load configuration from config.yaml"""
+def load_deployment_config() -> str:
+    """
+    Load deployment configuration from config.yaml and return the training job name.
+    
+    Returns:
+        str: Training job name for model loading
+    """
     try:
         config_path = 'config.yaml'  # config.yaml is copied to container root by Dockerfile
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
-        return config
+            
+        # Extract job name from deployment config
+        deployment = config.get('deployment', {})
+        job_name = deployment.get('job_name')
+        
+        if not job_name:
+            raise ValueError("job_name not found in deployment configuration")
+            
+        print(f"Loaded job name from config: {job_name}")
+        return job_name
+        
     except FileNotFoundError:
-        print("Warning: config.yaml not found, using environment variables")
-        return {}
+        print("Warning: config.yaml not found, using fallback job name")
+        # Fallback to environment variable or default
+        fallback_job = os.environ.get('TRAINING_JOB_NAME', 'pipelines-lk3adydlw4vv-YOLOTrainingStep-Obj-y6StW68c37')
+        return fallback_job
     except Exception as e:
         print(f"Error loading config.yaml: {e}")
-        return {}
-
-def get_deployment_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Get deployment configuration"""
-    deployment = config.get('deployment', {})
-
-    return {
-        'job_name': deployment.get('job_name', {}),
-        'lambda': deployment.get('lambda', {})
-    }
+        # Fallback to environment variable or default
+        fallback_job = os.environ.get('TRAINING_JOB_NAME', 'pipelines-lk3adydlw4vv-YOLOTrainingStep-Obj-y6StW68c37')
+        return fallback_job
 
 
-# Load configuration from config.yaml
-config = load_config()
-deployment_config = get_deployment_config(config)
-job_name = deployment_config.get('job_name')
-
+# Load training job name from configuration
+job_name = load_deployment_config()
 
 # Initialize S3 client
 s3_client = boto3.client('s3')
@@ -92,7 +97,7 @@ def load_model(job_name: str):
     
     if model_session is None:
         print("Loading ONNX model from S3 tar.gz...")
-        model_path = get_training_job_model_path(job_name)
+        model_path = get_model_artifacts_path(job_name)
         # Parse S3 path to get bucket and key
         parsed_url = urlparse(model_path)
         model_s3_bucket = parsed_url.netloc

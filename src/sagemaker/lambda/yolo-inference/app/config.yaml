@@ -222,7 +222,7 @@ validation:
 
 # Deployment Configuration
 deployment:
-  job_name: "pipelines-lk3adydlw4vv-YOLOTrainingStep-Obj-y6StW68c37" # used for lambda serverless deployment
+  job_name: "pipelines-jmzm21erriut-YOLOTrainingStep-Obj-aG58PUKYtI" # used for lambda serverless deployment
 
   lambda:
     function_name: "yolo-inference-function"
