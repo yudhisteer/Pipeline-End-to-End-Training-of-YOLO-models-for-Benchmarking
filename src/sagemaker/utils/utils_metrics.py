@@ -21,6 +21,23 @@ from utils.utils_config import (
     get_inference_config
 )
 
+def get_training_job_model_path(job_name: str) -> str:
+    """
+    Get the model path for a specific training job.
+    """
+    job_details = get_training_job_details(job_name)
+    
+    if job_details is None:
+        raise ValueError(f"Training job '{job_name}' not found or could not be retrieved")
+    
+    if "ModelArtifacts" not in job_details:
+        raise ValueError(f"Training job '{job_name}' does not have ModelArtifacts")
+    
+    if "S3ModelArtifacts" not in job_details["ModelArtifacts"]:
+        raise ValueError(f"Training job '{job_name}' does not have S3ModelArtifacts")
+    
+    return job_details["ModelArtifacts"]["S3ModelArtifacts"]
+
 
 def get_training_job_details(job_name: str) -> dict:
     """
@@ -782,3 +799,5 @@ def get_training_job_config(training_job_name: str) -> str:
                    
     except Exception as e:
         return f"❌ Error retrieving config: {str(e)}"
+
+
