@@ -10,5 +10,5 @@ inference:
 	@./run.sh inference
 
 # Run YOLO training
-training:
+train:
 	@./run.sh train
