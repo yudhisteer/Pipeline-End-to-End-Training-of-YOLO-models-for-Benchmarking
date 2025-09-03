@@ -6,18 +6,20 @@ Extends the existing YOLOSageMakerTrainer for hyperparameter optimization.
 import os
 import pandas as pd
 import yaml
+import re
 from datetime import datetime
 from typing import Dict, Any
 
+
 from sagemaker.tuner import HyperparameterTuner
-from sagemaker.parameter import (
-    ContinuousParameter, 
-    CategoricalParameter, 
-    IntegerParameter
-)
 
 from entrypoint_trainer import YOLOSageMakerTrainer
 from utils.utils_config import load_config
+from .utils.utils_finetuning import (
+    update_yaml_hyperparams, 
+    get_hyperparameter_ranges_from_config, 
+    process_hyperparameters
+)
 
 
 class YOLOHyperparameterTuner:
@@ -46,37 +48,7 @@ class YOLOHyperparameterTuner:
         """
         Define hyperparameter ranges for tuning from config.yaml.
         """
-        ranges = {}
-        hyperparameter_ranges = self.tuning_config.get('hyperparameter_ranges', {})
-        
-        for param_name, param_config in hyperparameter_ranges.items():
-            param_type = param_config.get('type')
-            
-            if param_type == 'continuous':
-                ranges[param_name] = ContinuousParameter(
-                    param_config['min'], 
-                    param_config['max']
-                )
-            elif param_type == 'categorical':
-                ranges[param_name] = CategoricalParameter(param_config['values'])
-            elif param_type == 'integer':
-                ranges[param_name] = IntegerParameter(
-                    param_config['min'], 
-                    param_config['max']
-                )
-            else:
-                print(f"Warning: Unknown parameter type '{param_type}' for {param_name}")
-        
-        print("Hyperparameter ranges for tuning (from config):")
-        for param, range_def in ranges.items():
-            if isinstance(range_def, ContinuousParameter):
-                print(f"  {param}: continuous [{range_def.min_value} - {range_def.max_value}]")
-            elif isinstance(range_def, CategoricalParameter):
-                print(f"  {param}: categorical {range_def.values}")
-            elif isinstance(range_def, IntegerParameter):
-                print(f"  {param}: integer [{range_def.min_value} - {range_def.max_value}]")
-            else:
-                print(f"  {param}: {range_def}")
+        ranges = get_hyperparameter_ranges_from_config(self.tuning_config)
         
         if not ranges:
             print("Warning: No hyperparameter ranges found in config.yaml")
@@ -321,12 +293,13 @@ class YOLOHyperparameterTuner:
             print("UPDATING CONFIG.YAML WITH BEST HYPERPARAMETERS")
             print("="*50)
             
-            # Read current config.yaml
+            # Read current config.yaml as lines to preserve formatting
             with open(self.config_path, 'r') as f:
-                config_content = f.read()
+                lines = f.readlines()
             
-            # Parse as YAML
-            config_data = yaml.safe_load(config_content)
+            # Also parse as YAML to get current hyperparams for comparison
+            with open(self.config_path, 'r') as f:
+                config_data = yaml.safe_load(f)
             
             # Backup original hyperparams
             original_hyperparams = config_data.get('training', {}).get('hyperparams', {}).copy()
@@ -335,46 +308,18 @@ class YOLOHyperparameterTuner:
             for key, value in original_hyperparams.items():
                 print(f"  {key}: {value}")
             
-            # Update with best hyperparameters
-            if 'training' not in config_data:
-                config_data['training'] = {}
-            if 'hyperparams' not in config_data['training']:
-                config_data['training']['hyperparams'] = {}
-            
             print(f"\nUpdating with best hyperparameters:")
-            for param, value in best_hyperparams.items():
-                # Convert all values to proper Python types (not numpy)
-                if hasattr(value, 'item'):  # numpy scalar
-                    value = value.item()
-                elif isinstance(value, str):
-                    # Clean up quoted strings and try to convert numbers
-                    value = value.strip('"\'')
-                    try:
-                        # Try to convert to int first, then float
-                        if value.replace('.', '').replace('-', '').isdigit():
-                            if '.' in value:
-                                value = float(value)
-                            else:
-                                value = int(value)
-                    except ValueError:
-                        # Keep as string for categorical values
-                        pass
-                
-                # Ensure we have basic Python types
-                if hasattr(value, 'dtype'):  # Any remaining numpy types
-                    value = value.item()
-                
-                config_data['training']['hyperparams'][param] = value
+            
+            # Process hyperparameters using utility function
+            processed_hyperparams = process_hyperparameters(best_hyperparams)
+            
+            for param, value in processed_hyperparams.items():
                 print(f"  {param}: {original_hyperparams.get(param, 'not set')} → {value}")
             
-            # Write updated config
-            with open(self.config_path, 'w') as f:
-                yaml.dump(config_data, f, 
-                         default_flow_style=False, 
-                         sort_keys=False,
-                         )
+            # Update only the hyperparams section using utility function
+            update_yaml_hyperparams(self.config_path, lines, processed_hyperparams)
             
-            print(f"Successfully updated {self.config_path}")
+            print(f"\nSuccessfully updated {self.config_path}")
             print(f"   Use these hyperparameters for your next training run!")
             print("="*50)
             
