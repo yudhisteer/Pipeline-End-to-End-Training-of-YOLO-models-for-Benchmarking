@@ -1,11 +1,67 @@
-"""
-Script to test YOLO Lambda inference
-"""
-
 import requests
-    
+import subprocess
+import yaml
+
+
+
 from utils.utils_config import load_config, get_inference_config
 from utils.utils_inference import get_s3_images, save_results_and_visualizations
+
+
+def update_config_with_latest_api_url(config_path: str = "config.yaml") -> str:
+    """
+    Extract the latest API Gateway URL from CloudFormation stack and update config.yaml
+    Returns the updated base_url or None if extraction fails
+    """
+    try:
+        print("Extracting API Gateway URL from CloudFormation outputs...")
+        
+        # run AWS CLI command to get CloudFormation outputs
+        result = subprocess.run([
+            'aws', 'cloudformation', 'describe-stacks',
+            '--stack-name', 'yolo-inference-batch',
+            '--region', 'us-east-1',
+            '--query', "Stacks[0].Outputs[?OutputKey=='YOLOInferenceApi'].OutputValue",
+            '--output', 'text'
+        ], capture_output=True, text=True, check=True)
+        
+        api_gateway_url = result.stdout.strip()
+        
+        if not api_gateway_url or api_gateway_url == 'None':
+            print("Warning: Could not extract API Gateway URL from CloudFormation outputs")
+            return None
+        
+        # extract base URL by removing the /predict endpoint
+        base_url = api_gateway_url[:-8]
+        
+        print(f"Found API Gateway URL: {api_gateway_url}")
+        print(f"Extracted base URL: {base_url}")
+        
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        # update the base_url in the config
+        if 'inference' not in config:
+            config['inference'] = {}
+        if 'lambda' not in config['inference']:
+            config['inference']['lambda'] = {}
+        
+        config['inference']['lambda']['base_url'] = base_url
+        
+        # write back the updated config
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+            
+        print(f"Successfully updated {config_path} with new base_url: {base_url}")
+        return base_url
+        
+            
+    except subprocess.CalledProcessError as e:
+        print(f"Error running AWS CLI command: {e}")
+        return None
+    except Exception as e:
+        print(f"Error updating config: {e}")
+        return None
 
 
 def test_health_check(base_url: str, health_endpoint: str = '/health') -> bool:
@@ -139,6 +195,7 @@ def run_batch_inference(
 
 
 def main():
+
     
     # load configs
     config = load_config("config.yaml")
@@ -149,6 +206,10 @@ def main():
     batch_size = inference_config['batch_size']
     s3_inference_dataset = inference_config['s3_inference_dataset']
     predict_endpoint = lambda_config['endpoints']['predict']
+    update_base_url = lambda_config['update_base_url']
+
+    if update_base_url:
+        base_url = update_config_with_latest_api_url("config.yaml")
     
     # 1. Test health check first
     if not test_health_check(base_url, '/health'):
