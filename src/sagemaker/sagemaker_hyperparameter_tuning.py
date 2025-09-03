@@ -15,7 +15,7 @@ from sagemaker.tuner import HyperparameterTuner
 
 from entrypoint_trainer import YOLOSageMakerTrainer
 from utils.utils_config import load_config
-from .utils.utils_finetuning import (
+from utils.utils_finetuning import (
     update_yaml_hyperparams, 
     get_hyperparameter_ranges_from_config, 
     process_hyperparameters
@@ -60,7 +60,7 @@ class YOLOHyperparameterTuner:
         """Create the SageMaker hyperparameter tuner."""
         
         # Create estimator
-        estimator = self.trainer.create_estimator()
+        estimator = self.trainer.create_estimator(verbose=False)
         
         # Get hyperparameter ranges
         hyperparameter_ranges = self.get_hyperparameter_ranges()

@@ -272,8 +272,12 @@ class YOLOSageMakerTrainer:
             print("You can manually check metrics using:")
             print("  python src/sagemaker/sagemaker_metrics.py [training_job_name]")
     
-    def create_estimator(self) -> PyTorch:
-        """Create and configure the PyTorch estimator for YOLO training."""
+    def create_estimator(self, verbose: bool = True) -> PyTorch:
+        """Create and configure the PyTorch estimator for YOLO training.
+        
+        Args:
+            verbose: Whether to print hyperparameters configuration (default: True)
+        """
         # Get training configuration
         instance_type = self.training_config.get('instance_type', 'ml.g4dn.xlarge')
         instance_count = self.training_config.get('instance_count', 1)
@@ -338,12 +342,13 @@ class YOLOSageMakerTrainer:
         print(f"  Max runtime: {max_run} seconds")
         
         # Display hyperparameters that will be used in training
-        print(f"Training hyperparameters from config:")
-        if self.hyperparams_config:
-            for key, value in self.hyperparams_config.items():
-                print(f"  {key}: {value}")
-        else:
-            print("  No hyperparameters configured - using YOLO defaults")
+        if verbose:
+            if self.hyperparams_config:
+                print(f"Training hyperparameters from config:")
+                for key, value in self.hyperparams_config.items():
+                    print(f"  {key}: {value}")
+            else:
+                print("  No hyperparameters configured - using YOLO defaults")
         
         return self.estimator
 
