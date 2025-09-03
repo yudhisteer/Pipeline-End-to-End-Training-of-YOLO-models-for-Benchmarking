@@ -74,9 +74,9 @@ training:
   # Hyperparameters actually used in training (modify these to change what's used)
   hyperparams:
     imgsz: 640
-    epochs: 2
+    epochs: 1
     batch: 4
-    lr0: 0.001
+    lr0: 0.1
     optimizer: SGD
 
 
@@ -150,55 +150,28 @@ all_hyperparams_available:
 # Hyperparameter Tuning Configuration
 # https://docs.ultralytics.com/guides/hyperparameter-tuning/#best_hyperparametersyaml
 tuning:
-  enabled: true  # Keep disabled for initial testing
-  max_jobs:   # reduced for testing
-  max_parallel_jobs: 1
-  objective_metric: mAP_0.5
-  objective_type: Maximize
+  enabled: true                    # Enable for hyperparameter tuning
+  max_jobs: 6                      # Small number for POC
+  max_parallel_jobs: 2             # Limited parallel jobs
+  objective_metric: mAP_0.5        # Primary YOLO metric
+  objective_type: Maximize         # We want to maximize mAP
 
-
+  # Active hyperparameter ranges for tuning
+  # To add more parameters, convert from all_hyperparams_available above using these formats:
+  # - Continuous: lr0: {type: continuous, min: 0.001, max: 0.01}
+  # - Categorical: optimizer: {type: categorical, values: ["SGD", "Adam", "AdamW"]}
+  # - Integer: epochs: {type: integer, min: 10, max: 100}
   hyperparameter_ranges:
-    batch:
+    lr0:                       
+      type: continuous
+      min: 0.1
+      max: 0.2
+    batch:                   
       type: categorical
-      values: [2, 4, 8]  # smaller values for testing
-    imgsz:
+      values: [2, 4]
+    optimizer:                   
       type: categorical
-      values: [640, 864]  # smaller sizes for testing
-    lr0:
-      type: continuous
-      min: 0.001
-      max: 0.1
-    weight_decay:
-      type: continuous
-      min: 0.0001
-      max: 0.001
-    dropout:
-      type: continuous
-      min: 0.0
-      max: 0.3
-    hsv_h:
-      type: continuous
-      min: 0.0
-      max: 0.1
-    degrees:
-      type: continuous
-      min: 0.0
-      max: 20.0
-    box:
-      type: continuous
-      min: 5.0
-      max: 10.0
-    cls:
-      type: continuous
-      min: 0.3
-      max: 1.0
-    label_smoothing:
-      type: continuous
-      min: 0.0
-      max: 0.3
-    optimizer:
-      type: categorical
-      values: ["SGD", "Adam", "AdamW"]
+      values: ["SGD", "Adam"]
 
 # Pipeline Configuration
 pipeline:
