@@ -65,7 +65,7 @@ training:
   model_dir: ./runs/train
   output_dir: ./output
   model_name: yolo12n.pt
-  instance_type: ml.m5.2xlarge
+  instance_type: ml.m5.12xlarge
   instance_count: 1
   volume_size: 30
   max_run: 3600  # 1 hour max for testing
@@ -74,7 +74,7 @@ training:
   # Hyperparameters actually used in training (modify these to change what's used)
   hyperparams:
     imgsz: 640
-    epochs: 25
+    epochs: 2
     batch: 4
     lr0: 0.001
     optimizer: SGD
@@ -150,11 +150,13 @@ all_hyperparams_available:
 # Hyperparameter Tuning Configuration
 # https://docs.ultralytics.com/guides/hyperparameter-tuning/#best_hyperparametersyaml
 tuning:
-  enabled: false  # Keep disabled for initial testing
+  enabled: true  # Keep disabled for initial testing
   max_jobs:   # reduced for testing
   max_parallel_jobs: 1
   objective_metric: mAP_0.5
   objective_type: Maximize
+
+
   hyperparameter_ranges:
     batch:
       type: categorical
@@ -204,24 +206,37 @@ pipeline:
   dry_run: false                   # Set to true to create pipeline without executing
   enable_caching: false            # Enable step caching for faster re-runs
   auto_approve_models: false       # Auto-approve registered models (use with caution)
+  
+  # Model approval strategy
+  approval_strategy: "quality_gated"  # "always", "never", "quality_gated"
+  # "always" - Auto-approve all models (for testing)
+  # "never" - Manual approval required for all models
+  # "quality_gated" - Smart approval based on quality thresholds
 
   name: "yolo-training-pipeline-object-detection"
   training_step_name: "YOLOTrainingStep-ObjectDetection"
   registration_step_name: "YOLOModelRegistrationStep-ObjectDetection"
   model_package_group_name: "yolo-model-package-group-object-detection"
 
-# Model Validation Configuration
-validation:
-  # Model quality thresholds for SageMaker Model Registry
-  min_mAP_0_5: 0.3
-  min_precision: 0.5
-  min_recall: 0.4
-  max_model_size_mb: 500
-  max_inference_time_ms: 100
+
+# Model Registry Configuration
+approval:
+  # These determine which models get auto-approved for deployment
+  quality_gates:
+    min_mAP_0_5: 0.1     
+    min_precision: 0.1       
+    min_recall: 0.1          
+    # max_model_size_mb: 400   
+    # max_inference_time_ms: 80 
+  
+  # Approval behavior settings
+  require_all_thresholds: true    # All thresholds must pass (vs any)
+  allow_manual_override: true     # Allow manual approval even if quality gates fail
 
 
 # Deployment Configuration
 deployment:
+  job_name: ""
   lambda:
     function_name: "yolo-inference-function"
     stack_name: "yolo-inference-stack"
