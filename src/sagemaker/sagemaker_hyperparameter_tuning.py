@@ -188,7 +188,7 @@ class YOLOHyperparameterTuner:
                 # Check if all values are the same
                 unique_scores = completed_df['FinalObjectiveValue'].nunique()
                 if unique_scores == 1:
-                    print(f"  ⚠️  WARNING: All jobs achieved the same mAP@0.5 score!")
+                    print(f"  WARNING: All jobs achieved the same mAP@0.5 score!")
                     print(f"      This suggests hyperparameters may not be having an impact.")
                     print(f"      Consider: longer training time, different hyperparameters, or larger dataset.")
             
@@ -290,13 +290,13 @@ class YOLOHyperparameterTuner:
             # Auto-update config if enabled and we have hyperparameters
             if (self.tuning_config.get('update_config', False) and 
                 not completed_df.empty and recommended_params):
-                print(f"\n🔄 Auto-update enabled - updating config.yaml...")
+                print(f"\nAuto-update enabled - updating config.yaml...")
                 if self.update_config_with_best_hyperparameters(recommended_params):
-                    print(f"✅ Config updated! Ready for next training run with optimized hyperparameters.")
+                    print(f"Config updated! Ready for next training run with optimized hyperparameters.")
                 else:
-                    print(f"❌ Config update failed. You can manually copy the recommended hyperparameters.")
+                    print(f"Config update failed. You can manually copy the recommended hyperparameters.")
             elif self.tuning_config.get('update_config', False):
-                print(f"\n⚠️  Auto-update enabled but no hyperparameters found to update")
+                print(f"\nAuto-update enabled but no hyperparameters found to update")
             
             print("="*60)
             
@@ -382,14 +382,14 @@ class YOLOHyperparameterTuner:
                          allow_unicode=True,
                          default_style=None)
             
-            print(f"✅ Successfully updated {self.config_path}")
+            print(f"Successfully updated {self.config_path}")
             print(f"   Use these hyperparameters for your next training run!")
             print("="*50)
             
             return True
             
         except Exception as e:
-            print(f"❌ Error updating config.yaml: {e}")
+            print(f"Error updating config.yaml: {e}")
             print(f"   Original config preserved")
             return False
     
@@ -410,9 +410,15 @@ class YOLOHyperparameterTuner:
         # Start tuning job
         tuner = self.start_tuning_job(wait=wait_for_completion)
         
-        print("="*60)
-        print("YOLO Hyperparameter Tuning POC Started")
-        print("="*60)
+        # Only show completion message if we waited for completion
+        if wait_for_completion:
+            print("\n" + "="*60)
+            print("YOLO Hyperparameter Tuning COMPLETED")
+            print("="*60)
+        else:
+            print("\n" + "="*60)
+            print("YOLO Hyperparameter Tuning STARTED")
+            print("="*60)
         
         return {
             "tuning_job_name": self.tuning_job_name,
