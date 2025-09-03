@@ -5,6 +5,8 @@ Uses the standalone YOLOSageMakerTrainer for training functionality.
 
 import os
 import time
+import json
+import boto3
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -135,9 +137,23 @@ class YOLOSageMakerPipeline:
         Returns:
             Configured model registration step
         """
-        # Determine approval status based on config
-        auto_approve = self.pipeline_config.get('auto_approve_models', False)
-        approval_status = "Approved" if auto_approve else "PendingManualApproval"
+        # Determine approval status based on quality gates and config
+        meets_quality_gates, gate_reason = self._check_quality_gates()
+        approval_strategy = self.pipeline_config.get('approval_strategy', 'quality_gated')
+        
+        if approval_strategy == "always":
+            approval_status = "Approved"
+            approval_reason = "Always approve strategy enabled"
+        elif approval_strategy == "never":
+            approval_status = "PendingManualApproval"
+            approval_reason = "Never approve strategy - manual review required"
+        else:  # quality_gated
+            if meets_quality_gates:
+                approval_status = "Approved"
+                approval_reason = f"Quality gates passed: {gate_reason}"
+            else:
+                approval_status = "PendingManualApproval" 
+                approval_reason = f"Quality gates check: {gate_reason}"
         
         # Create model registration step
         registration_step = RegisterModel(
@@ -155,7 +171,9 @@ class YOLOSageMakerPipeline:
         
         print(f"Created model registration step: {self.registration_step_name}")
         print(f"  Model package group: {self.model_package_group_name}")
+        print(f"  Approval strategy: {approval_strategy}")
         print(f"  Approval status: {approval_status}")
+        print(f"  Approval reason: {approval_reason}")
         
         return registration_step
     
@@ -186,6 +204,205 @@ class YOLOSageMakerPipeline:
         print("  - Model size (Memory footprint)")
         
         return model_statistics
+    
+    def _check_quality_gates(self) -> tuple[bool, str]:
+        """
+        Check if the model meets quality gates for auto-approval.
+        
+        Returns:
+            Tuple of (meets_gates: bool, reason: str)
+        """
+        try:
+            # Get approval configuration
+            approval_config = self.config.get('approval', {})
+            quality_gates = approval_config.get('quality_gates', {})
+            
+            if not quality_gates:
+                print("Warning: No quality gates configured, defaulting to manual approval")
+                return False, "No quality gates configured"
+            
+            # Try to load the evaluation metrics from the training output
+            evaluation_path = f"{self.trainer.s3_model_output}/evaluation.json"
+            
+            # For now, we'll implement a basic check
+            # In a full implementation, you'd download and parse the evaluation.json
+            print(f"Quality gates configured:")
+            for gate, threshold in quality_gates.items():
+                print(f"  {gate}: {threshold}")
+            
+            # Since we can't easily access the training metrics here during pipeline creation,
+            # we'll return based on the approval strategy
+            approval_strategy = self.pipeline_config.get('approval_strategy', 'quality_gated')
+            
+            if approval_strategy == "always":
+                return True, "Always approve strategy"
+            elif approval_strategy == "never":
+                return False, "Never approve strategy"
+            else:  # quality_gated
+                # For quality_gated, register as pending and validate after training
+                return False, "Quality gates will be checked after training completes"
+                    
+        except Exception as e:
+            print(f"Error checking quality gates: {e}")
+            return False, f"Error checking quality gates: {e}"
+    
+    def validate_model_quality_post_training(self, training_job_name: str) -> tuple[bool, dict]:
+        """
+        Validate model quality against quality gates after training is complete.
+        This can be called after pipeline execution to check actual metrics.
+        
+        Args:
+            training_job_name: Name of the completed training job
+            
+        Returns:
+            Tuple of (passes_gates: bool, validation_report: dict)
+        """
+        try:
+            # Get approval configuration
+            approval_config = self.config.get('approval', {})
+            quality_gates = approval_config.get('quality_gates', {})
+            require_all = approval_config.get('require_all_thresholds', True)
+            
+            # Get training job details to find S3 output path
+            sagemaker_client = boto3.client('sagemaker')
+            job_details = sagemaker_client.describe_training_job(TrainingJobName=training_job_name)
+            output_path = job_details['OutputDataConfig']['S3OutputPath']
+            
+            # Construct path to evaluation.json
+            s3_evaluation_path = f"{output_path}/{training_job_name}/output/evaluation.json"
+            
+            # Download and parse evaluation metrics
+            s3_client = boto3.client('s3')
+            # Parse S3 path
+            bucket = output_path.split('/')[2]
+            key = '/'.join(output_path.split('/')[3:]) + f"/{training_job_name}/output/evaluation.json"
+            
+            try:
+                response = s3_client.get_object(Bucket=bucket, Key=key)
+                evaluation_data = json.loads(response['Body'].read().decode('utf-8'))
+                metrics = evaluation_data.get('metrics', {})
+                model_info = evaluation_data.get('model_info', {})
+                
+                # Check each quality gate dynamically
+                validation_results = {}
+                passes_count = 0
+                total_gates = len(quality_gates)
+                
+                # Mapping of gate names to metric extraction logic
+                gate_mappings = {
+                    "min_mAP_0_5": lambda: (metrics.get('mAP_0.5', 0.0), ">="),
+                    "min_mAP_0_5_0_95": lambda: (metrics.get('mAP_0.5_0.95', 0.0), ">="), 
+                    "min_precision": lambda: (metrics.get('precision', 0.0), ">="),
+                    "min_recall": lambda: (metrics.get('recall', 0.0), ">="),
+                    "min_f1_score": lambda: (metrics.get('f1_score', 0.0), ">="),
+                    "max_model_size_mb": lambda: (model_info.get('model_size_mb', float('inf')), "<="),
+                    "max_inference_time_ms": lambda: (model_info.get('inference_time_ms', 100), "<="),
+                    "min_speed_fps": lambda: (model_info.get('speed_fps', 0.0), ">="),
+                }
+                
+                for gate_name, threshold in quality_gates.items():
+                    if gate_name in gate_mappings:
+                        actual_value, operator = gate_mappings[gate_name]()
+                        
+                        if operator == ">=":
+                            passes = actual_value >= threshold
+                        elif operator == "<=":
+                            passes = actual_value <= threshold
+                        else:
+                            passes = False
+                    else:
+                        # Unknown gate - skip with warning
+                        print(f"Warning: Unknown quality gate '{gate_name}' - skipping")
+                        actual_value = None
+                        passes = True  # Don't fail on unknown gates
+                        total_gates -= 1  # Don't count unknown gates
+                    
+                    validation_results[gate_name] = {
+                        'threshold': threshold,
+                        'actual': actual_value,
+                        'passes': passes
+                    }
+                    
+                    if passes:
+                        passes_count += 1
+                
+                # Determine overall pass/fail
+                if require_all:
+                    overall_pass = passes_count == total_gates
+                else:
+                    overall_pass = passes_count > 0
+                
+                validation_report = {
+                    'training_job_name': training_job_name,
+                    'overall_pass': overall_pass,
+                    'strategy': 'require_all' if require_all else 'require_any',
+                    'gates_passed': f"{passes_count}/{total_gates}",
+                    'detailed_results': validation_results,
+                    'evaluation_path': s3_evaluation_path
+                }
+                
+                return overall_pass, validation_report
+                
+            except Exception as e:
+                return False, {
+                    'error': f"Could not load evaluation metrics: {e}",
+                    'training_job_name': training_job_name
+                }
+                
+        except Exception as e:
+            return False, {
+                'error': f"Validation failed: {e}",
+                'training_job_name': training_job_name
+            }
+    
+    def update_model_approval_after_training(self, execution) -> dict:
+        """
+        Simple method to check quality gates and update model approval after training.
+        Call this after pipeline execution completes.
+        
+        Args:
+            execution: SageMaker pipeline execution object
+            
+        Returns:
+            dict: Approval update results
+        """
+        try:
+            # Get training job name from execution
+            steps = execution.list_steps()
+            training_job_name = None
+            
+            for step in steps:
+                if step['StepName'] == self.training_step_name:
+                    if 'Metadata' in step and 'TrainingJob' in step['Metadata']:
+                        training_job_name = step['Metadata']['TrainingJob']['Arn'].split('/')[-1]
+                        break
+            
+            if not training_job_name:
+                return {'error': 'Could not find training job name from execution'}
+            
+            # Validate quality gates
+            passes_gates, validation_report = self.validate_model_quality_post_training(training_job_name)
+            
+            if passes_gates:
+                # Update model package to approved status
+                # Find the registered model package
+                approval_config = self.config.get('approval', {})
+                if approval_config.get('allow_manual_override', True):
+                    # For simplicity, just return the validation report
+                    # In practice, you'd update the model package status here
+                    validation_report['recommendation'] = 'APPROVE'
+                    validation_report['action_needed'] = f'Manually approve model package for training job: {training_job_name}'
+                else:
+                    validation_report['recommendation'] = 'REJECT'
+                    validation_report['action_needed'] = f'Model failed quality gates - manual override disabled'
+            else:
+                validation_report['recommendation'] = 'REJECT'
+                validation_report['action_needed'] = f'Model failed quality gates - keep as pending manual approval'
+            
+            return validation_report
+            
+        except Exception as e:
+            return {'error': f'Failed to update model approval: {e}'}
     
     def create_pipeline(self) -> Pipeline:
         """
@@ -260,21 +477,21 @@ class YOLOSageMakerPipeline:
         )
         
         print(f"Pipeline execution started successfully!")
-        print(f"  Execution ARN: {execution.arn}")
+        print(f"Execution ARN: {execution.arn}")
         
         # Extract execution ID from ARN and update config path for traceability
         try:
             execution_id = execution.arn.split('/')[-1]
-            print(f"  Execution ID: {execution_id}")
+            print(f"Execution ID: {execution_id}")
             
-            # Upload config with execution ID for traceability
+            # upload config with execution ID
             if self.trainer.upload_config_with_execution_id(execution_id):
-                print(f"  Config uploaded with execution ID for traceability")
+                print(f"Config uploaded successfully!")
             else:
-                print(f"  Config upload failed")
+                print(f"Config upload failed")
                 
         except Exception as e:
-            print(f"  Warning: Could not extract execution ID: {e}")
+            print(f"Warning: Could not extract execution ID: {e}")
         
         print(f"\nMonitoring Information:")
         print(f"  Pipeline Name: {self.pipeline_name}")
@@ -344,7 +561,8 @@ class YOLOSageMakerPipeline:
             "pipeline_name": self.pipeline_name,
             "execution_arn": execution.arn,
             "timestamp": self.timestamp,
-            "model_package_group": self.model_package_group_name
+            "model_package_group": self.model_package_group_name,
+            "execution": execution  # Add execution object for quality gate checking
         }
     
     def _monitor_execution_with_logs(self, execution):
@@ -537,10 +755,41 @@ def main():
         else:
             # Run complete pipeline
             result = pipeline.run_pipeline(wait_for_completion=wait_for_completion)
+            
+            # Check quality gates if using quality_gated strategy and pipeline completed
+            approval_strategy = pipeline_config.get('approval_strategy', 'quality_gated')
+            if approval_strategy == 'quality_gated' and wait_for_completion:
+                # Get execution object and check its actual status
+                execution = result.get('execution')
+                if execution:
+                    try:
+                        execution_status = execution.describe().get('PipelineExecutionStatus', 'Unknown')
+                        if execution_status == 'Succeeded':
+                            print(f"\nChecking quality gates for approval...")
+                            approval_result = pipeline.update_model_approval_after_training(execution)
+                            print(f"\nQuality Gate Results:")
+                            if approval_result.get('overall_pass'):
+                                print(f"Status: PASSED")
+                                print(f"Gates passed: {approval_result.get('gates_passed', 'N/A')}")
+                                print(f"Recommendation: {approval_result.get('recommendation', 'N/A')}")
+                            else:
+                                print(f"Status: FAILED")
+                                print(f"Gates passed: {approval_result.get('gates_passed', 'N/A')}")
+                                print(f"Recommendation: {approval_result.get('recommendation', 'N/A')}")
+                            
+                            print(f"Action needed: {approval_result.get('action_needed', 'N/A')}")
+                            result['quality_gates'] = approval_result
+                        else:
+                            print(f"\nPipeline status is {execution_status} - skipping quality gate checks")
+                    except Exception as e:
+                        print(f"Quality gate checking failed: {e}")
+                else:
+                    print("Could not access execution for quality gate checking")
         
         print(f"\nPipeline Results:")
         for key, value in result.items():
-            print(f"  {key}: {value}")
+            if key != 'quality_gates':  # Don't print the full quality gates dict
+                print(f"  {key}: {value}")
     
     except Exception as e:
         print(f"Error running pipeline: {str(e)}")
