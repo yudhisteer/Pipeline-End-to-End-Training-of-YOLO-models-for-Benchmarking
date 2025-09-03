@@ -13,6 +13,68 @@ from urllib.parse import urlparse
 
 
 
+def get_latest_successful_training_job() -> str:
+    """
+    Get the latest successful training job from SageMaker.
+    
+    Returns:
+        str: Latest successful training job name
+    """
+    try:
+        sm = boto3.client("sagemaker")
+        
+        # Get recent training jobs, sorted by creation time (newest first)
+        response = sm.list_training_jobs(
+            SortBy="CreationTime", 
+            SortOrder="Descending", 
+            MaxResults=50  # Look at more jobs to find a successful one
+        )
+        
+        # Find the first completed job
+        for job in response["TrainingJobSummaries"]:
+            if job["TrainingJobStatus"] == "Completed":
+                job_name = job["TrainingJobName"]
+                print(f"Found latest successful training job: {job_name}")
+                return job_name
+        
+        raise ValueError("No successful training jobs found")
+        
+    except Exception as e:
+        raise Exception(f"Error retrieving latest training job: {e}")
+
+
+def load_deployment_config() -> str:
+    """
+    Load deployment configuration from config.yaml and return the training job name.
+    If job_name is empty, gets the latest successful training job from SageMaker.
+    
+    Returns:
+        str: Training job name for model loading
+    """
+    try:
+        config_path = 'config.yaml'  # config.yaml is copied to container root by Dockerfile
+        with open(config_path, 'r') as file:
+            config = yaml.safe_load(file)
+            
+        # extract job name from deployment config
+        deployment = config.get('deployment', {})
+        job_name = deployment.get('job_name')
+        
+        if not job_name or job_name.strip() == '':
+            job_name = get_latest_successful_training_job()
+            print(f"No job name provided. Getting latest successful training job: {job_name}")
+        else:
+            print(f"Loaded job name from config: {job_name}")
+            
+        return job_name
+        
+    except FileNotFoundError:
+        raise Exception("config.yaml not found!")
+    except Exception as e:
+        raise Exception(f"Error loading config.yaml: {e}")
+
+
+
 def get_model_artifacts_path(job_name: str) -> str:
     """
     Get the S3 model artifacts path for a specific SageMaker training job.
@@ -43,42 +105,10 @@ def get_model_artifacts_path(job_name: str) -> str:
         
     except Exception as e:
         error_msg = f"Failed to get model artifacts for training job '{job_name}': {e}"
-        print(f"Error: {error_msg}")
         raise ValueError(error_msg)
 
 
-def load_deployment_config() -> str:
-    """
-    Load deployment configuration from config.yaml and return the training job name.
-    
-    Returns:
-        str: Training job name for model loading
-    """
-    try:
-        config_path = 'config.yaml'  # config.yaml is copied to container root by Dockerfile
-        with open(config_path, 'r') as file:
-            config = yaml.safe_load(file)
-            
-        # Extract job name from deployment config
-        deployment = config.get('deployment', {})
-        job_name = deployment.get('job_name')
-        
-        if not job_name:
-            raise ValueError("job_name not found in deployment configuration")
-            
-        print(f"Loaded job name from config: {job_name}")
-        return job_name
-        
-    except FileNotFoundError:
-        print("Warning: config.yaml not found, using fallback job name")
-        # Fallback to environment variable or default
-        fallback_job = os.environ.get('TRAINING_JOB_NAME', 'pipelines-lk3adydlw4vv-YOLOTrainingStep-Obj-y6StW68c37')
-        return fallback_job
-    except Exception as e:
-        print(f"Error loading config.yaml: {e}")
-        # Fallback to environment variable or default
-        fallback_job = os.environ.get('TRAINING_JOB_NAME', 'pipelines-lk3adydlw4vv-YOLOTrainingStep-Obj-y6StW68c37')
-        return fallback_job
+
 
 
 # Load training job name from configuration
