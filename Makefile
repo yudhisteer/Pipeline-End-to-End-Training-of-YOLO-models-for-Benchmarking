@@ -1,5 +1,5 @@
 # YOLO Pipeline
-.PHONY: deploy inference
+.PHONY: deploy inference train
 
 # Deploy YOLO Lambda function
 deploy:
@@ -7,4 +7,8 @@ deploy:
 
 # Run YOLO inference
 inference:
-	@python src/sagemaker/sagemaker_inference.py
+	@./run.sh inference
+
+# Run YOLO training
+training:
+	@./run.sh train
