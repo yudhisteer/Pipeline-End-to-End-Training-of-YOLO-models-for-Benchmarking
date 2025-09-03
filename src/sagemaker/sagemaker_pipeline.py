@@ -268,20 +268,52 @@ class YOLOSageMakerPipeline:
             job_details = sagemaker_client.describe_training_job(TrainingJobName=training_job_name)
             output_path = job_details['OutputDataConfig']['S3OutputPath']
             
-            # Construct path to evaluation.json
-            s3_evaluation_path = f"{output_path}/{training_job_name}/output/evaluation.json"
+            # Construct path to model.tar.gz (not evaluation.json directly)
+            s3_model_path = f"{output_path}/{training_job_name}/output/model.tar.gz"
             
-            # Download and parse evaluation metrics
+            # Download and extract model.tar.gz to find evaluation.json
             s3_client = boto3.client('s3')
             # Parse S3 path
             bucket = output_path.split('/')[2]
-            key = '/'.join(output_path.split('/')[3:]) + f"/{training_job_name}/output/evaluation.json"
+            key = '/'.join(output_path.split('/')[3:]) + f"/{training_job_name}/output/model.tar.gz"
             
             try:
-                response = s3_client.get_object(Bucket=bucket, Key=key)
-                evaluation_data = json.loads(response['Body'].read().decode('utf-8'))
-                metrics = evaluation_data.get('metrics', {})
-                model_info = evaluation_data.get('model_info', {})
+                print(f"Attempting to download model.tar.gz from s3://{bucket}/{key}")
+                
+                # Download tar.gz file
+                import tempfile
+                import tarfile
+                with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as tar_tmp_file:
+                    s3_client.download_fileobj(bucket, key, tar_tmp_file)
+                    tar_tmp_file.flush()
+                    
+                    # Extract evaluation.json from tar.gz
+                    with tarfile.open(tar_tmp_file.name, 'r:gz') as tar:
+                        # Look for evaluation.json in the tar file
+                        evaluation_member = None
+                        for member in tar.getmembers():
+                            if member.name.endswith('evaluation.json') or member.name == 'evaluation.json':
+                                evaluation_member = member
+                                break
+                        
+                        if evaluation_member is None:
+                            raise FileNotFoundError("evaluation.json not found in the tar.gz file")
+                        
+                        print(f"Found {evaluation_member.name} in tar.gz")
+                        
+                        # Extract and read evaluation.json
+                        extracted_file = tar.extractfile(evaluation_member)
+                        if extracted_file is None:
+                            raise RuntimeError(f"Could not extract {evaluation_member.name}")
+                        
+                        evaluation_data = json.loads(extracted_file.read().decode('utf-8'))
+                        metrics = evaluation_data.get('metrics', {})
+                        model_info = evaluation_data.get('model_info', {})
+                        print(f"Successfully loaded evaluation data with metrics: {list(metrics.keys())}")
+                    
+                    # Clean up temp file
+                    import os
+                    os.unlink(tar_tmp_file.name)
                 
                 # Check each quality gate dynamically
                 validation_results = {}
@@ -338,15 +370,18 @@ class YOLOSageMakerPipeline:
                     'strategy': 'require_all' if require_all else 'require_any',
                     'gates_passed': f"{passes_count}/{total_gates}",
                     'detailed_results': validation_results,
-                    'evaluation_path': s3_evaluation_path
+                    'evaluation_path': s3_model_path
                 }
                 
                 return overall_pass, validation_report
                 
             except Exception as e:
+                print(f"Failed to extract evaluation.json from model.tar.gz: {e}")
+                print(f"Tried downloading: s3://{bucket}/{key}")
                 return False, {
-                    'error': f"Could not load evaluation metrics: {e}",
-                    'training_job_name': training_job_name
+                    'error': f"Could not load evaluation metrics from model.tar.gz: {e}",
+                    'training_job_name': training_job_name,
+                    'attempted_path': f"s3://{bucket}/{key}"
                 }
                 
         except Exception as e:
@@ -776,6 +811,37 @@ def main():
                                 print(f"Status: FAILED")
                                 print(f"Gates passed: {approval_result.get('gates_passed', 'N/A')}")
                                 print(f"Recommendation: {approval_result.get('recommendation', 'N/A')}")
+                            
+                            # Display quality gate comparison table
+                            detailed_results = approval_result.get('detailed_results', {})
+                            if detailed_results:
+                                print("\nQuality Gate Comparison:")
+                                print("-" * 70)
+                                print(f"{'Gate':<20} {'Required':<12} {'Actual':<12} {'Status':<10} {'Gap':<10}")
+                                print("-" * 70)
+                                
+                                for gate_name, gate_info in detailed_results.items():
+                                    threshold = gate_info.get('threshold', 'N/A')
+                                    actual = gate_info.get('actual', 'N/A')
+                                    passes = gate_info.get('passes', False)
+                                    
+                                    # Format values
+                                    if isinstance(threshold, (int, float)) and isinstance(actual, (int, float)):
+                                        threshold_str = f"{threshold:.3f}"
+                                        actual_str = f"{actual:.3f}"
+                                        gap = actual - threshold if gate_name.startswith('min_') else threshold - actual
+                                        gap_str = f"{gap:+.3f}"
+                                    else:
+                                        threshold_str = str(threshold)
+                                        actual_str = str(actual)
+                                        gap_str = "N/A"
+                                    
+                                    status_str = "✅ PASS" if passes else "❌ FAIL"
+                                    display_name = gate_name.replace('min_', '').replace('_', ' ').title()
+                                    
+                                    print(f"{display_name:<20} {threshold_str:<12} {actual_str:<12} {status_str:<10} {gap_str:<10}")
+                                
+                                print("-" * 70)
                             
                             print(f"Action needed: {approval_result.get('action_needed', 'N/A')}")
                             result['quality_gates'] = approval_result
