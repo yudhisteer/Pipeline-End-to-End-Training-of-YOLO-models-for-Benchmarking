@@ -367,20 +367,12 @@ class YOLOHyperparameterTuner:
                 config_data['training']['hyperparams'][param] = value
                 print(f"  {param}: {original_hyperparams.get(param, 'not set')} → {value}")
             
-            # Create backup of original config
-            backup_path = f"{self.config_path}.backup-{self.timestamp}"
-            with open(backup_path, 'w') as f:
-                f.write(config_content)
-            print(f"\nOriginal config backed up to: {backup_path}")
-            
-            # Write updated config with clean formatting
+            # Write updated config
             with open(self.config_path, 'w') as f:
                 yaml.dump(config_data, f, 
                          default_flow_style=False, 
-                         indent=2, 
                          sort_keys=False,
-                         allow_unicode=True,
-                         default_style=None)
+                         )
             
             print(f"Successfully updated {self.config_path}")
             print(f"   Use these hyperparameters for your next training run!")

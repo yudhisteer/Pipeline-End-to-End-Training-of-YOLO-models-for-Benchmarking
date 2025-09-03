@@ -72,6 +72,7 @@ training:
 
 
   # Hyperparameters actually used in training (modify these to change what's used)
+  # these will be updated if tuning.update_config is true
   hyperparams:
     imgsz: 640
     epochs: 1
@@ -210,7 +211,7 @@ approval:
 
 # Deployment Configuration
 deployment:
-  job_name: ""
+  job_name: "" # if empty take latest training job
   lambda:
     function_name: "yolo-inference-function"
     stack_name: "yolo-inference-stack"
@@ -253,7 +254,7 @@ inference:
   
   # Lambda Runtime Configuration
   lambda:
-    # API endpoints
+    update_base_url: true
     base_url: "https://nzhux8c6x6.execute-api.us-east-1.amazonaws.com/Prod"
     local_base_url: "http://127.0.0.1:3000"
     endpoints:
