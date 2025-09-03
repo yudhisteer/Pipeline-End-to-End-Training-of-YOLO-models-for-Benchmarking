@@ -5,6 +5,7 @@ Extends the existing YOLOSageMakerTrainer for hyperparameter optimization.
 
 import os
 import pandas as pd
+import yaml
 from datetime import datetime
 from typing import Dict, Any
 
@@ -27,6 +28,7 @@ class YOLOHyperparameterTuner:
     
     def __init__(self, config_path: str = "config.yaml"):
         """Initialize the hyperparameter tuner."""
+        self.config_path = config_path
         self.config = load_config(config_path)
         self.tuning_config = self.config.get('tuning', {})
         
@@ -285,6 +287,17 @@ class YOLOHyperparameterTuner:
                 else:
                     print("  No hyperparameter data found in results")
             
+            # Auto-update config if enabled and we have hyperparameters
+            if (self.tuning_config.get('update_config', False) and 
+                not completed_df.empty and recommended_params):
+                print(f"\n🔄 Auto-update enabled - updating config.yaml...")
+                if self.update_config_with_best_hyperparameters(recommended_params):
+                    print(f"✅ Config updated! Ready for next training run with optimized hyperparameters.")
+                else:
+                    print(f"❌ Config update failed. You can manually copy the recommended hyperparameters.")
+            elif self.tuning_config.get('update_config', False):
+                print(f"\n⚠️  Auto-update enabled but no hyperparameters found to update")
+            
             print("="*60)
             
         except Exception as e:
@@ -292,6 +305,93 @@ class YOLOHyperparameterTuner:
             print("You can view detailed results in the SageMaker console")
             import traceback
             traceback.print_exc()
+    
+    def update_config_with_best_hyperparameters(self, best_hyperparams: Dict[str, Any]) -> bool:
+        """
+        Update config.yaml with the best hyperparameters from tuning.
+        
+        Args:
+            best_hyperparams: Dictionary of best hyperparameters
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            print(f"\n" + "="*50)
+            print("UPDATING CONFIG.YAML WITH BEST HYPERPARAMETERS")
+            print("="*50)
+            
+            # Read current config.yaml
+            with open(self.config_path, 'r') as f:
+                config_content = f.read()
+            
+            # Parse as YAML
+            config_data = yaml.safe_load(config_content)
+            
+            # Backup original hyperparams
+            original_hyperparams = config_data.get('training', {}).get('hyperparams', {}).copy()
+            
+            print(f"Original hyperparameters:")
+            for key, value in original_hyperparams.items():
+                print(f"  {key}: {value}")
+            
+            # Update with best hyperparameters
+            if 'training' not in config_data:
+                config_data['training'] = {}
+            if 'hyperparams' not in config_data['training']:
+                config_data['training']['hyperparams'] = {}
+            
+            print(f"\nUpdating with best hyperparameters:")
+            for param, value in best_hyperparams.items():
+                # Convert all values to proper Python types (not numpy)
+                if hasattr(value, 'item'):  # numpy scalar
+                    value = value.item()
+                elif isinstance(value, str):
+                    # Clean up quoted strings and try to convert numbers
+                    value = value.strip('"\'')
+                    try:
+                        # Try to convert to int first, then float
+                        if value.replace('.', '').replace('-', '').isdigit():
+                            if '.' in value:
+                                value = float(value)
+                            else:
+                                value = int(value)
+                    except ValueError:
+                        # Keep as string for categorical values
+                        pass
+                
+                # Ensure we have basic Python types
+                if hasattr(value, 'dtype'):  # Any remaining numpy types
+                    value = value.item()
+                
+                config_data['training']['hyperparams'][param] = value
+                print(f"  {param}: {original_hyperparams.get(param, 'not set')} → {value}")
+            
+            # Create backup of original config
+            backup_path = f"{self.config_path}.backup-{self.timestamp}"
+            with open(backup_path, 'w') as f:
+                f.write(config_content)
+            print(f"\nOriginal config backed up to: {backup_path}")
+            
+            # Write updated config with clean formatting
+            with open(self.config_path, 'w') as f:
+                yaml.dump(config_data, f, 
+                         default_flow_style=False, 
+                         indent=2, 
+                         sort_keys=False,
+                         allow_unicode=True,
+                         default_style=None)
+            
+            print(f"✅ Successfully updated {self.config_path}")
+            print(f"   Use these hyperparameters for your next training run!")
+            print("="*50)
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error updating config.yaml: {e}")
+            print(f"   Original config preserved")
+            return False
     
     def run_tuning(self, wait_for_completion: bool = True) -> Dict[str, Any]:
         """

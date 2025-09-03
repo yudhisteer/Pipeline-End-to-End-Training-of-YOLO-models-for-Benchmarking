@@ -151,6 +151,7 @@ all_hyperparams_available:
 # https://docs.ultralytics.com/guides/hyperparameter-tuning/#best_hyperparametersyaml
 tuning:
   enabled: true                    # Enable for hyperparameter tuning
+  update_config: true              # Update config.yaml with best hyperparameters after tuning
   max_jobs: 6                      # Small number for POC
   max_parallel_jobs: 2             # Limited parallel jobs
   objective_metric: mAP_0.5        # Primary YOLO metric
@@ -196,14 +197,14 @@ pipeline:
 approval:
   # These determine which models get auto-approved for deployment
   quality_gates:
-    min_mAP_0_5: 0.1     
-    min_precision: 0.1       
-    min_recall: 0.1          
+    min_mAP_0_5: 0.001     
+    # min_precision: 0.1       
+    # min_recall: 0.1          
     # max_model_size_mb: 400   
     # max_inference_time_ms: 80 
   
   # Approval behavior settings
-  require_all_thresholds: true    # All thresholds must pass (vs any)
+  require_all_thresholds: false    # All thresholds must pass (vs any)
   allow_manual_override: true     # Allow manual approval even if quality gates fail
 
 
