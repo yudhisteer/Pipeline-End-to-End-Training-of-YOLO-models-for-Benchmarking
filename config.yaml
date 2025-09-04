@@ -72,16 +72,15 @@ training:
 
 
   # Hyperparameters actually used in training (modify these to change what's used)
-  # these will be updated if tuning.update_config is true
+  # these will be updated if tuning.update_config is true before training
   hyperparams:
     imgsz: 640
     epochs: 1
-    batch: 4
+    batch: 2
     lr0: 0.1
-    optimizer: SGD
+    optimizer: Adam
 
-
-
+    
 # Reference: All Available YOLO Hyperparameters
 # Copy any of these to training.hyperparams above to use them
 # These are NOT used by the code - just for reference
@@ -179,34 +178,60 @@ tuning:
 pipeline:
   # Execution behavior
   dry_run: false                   # Set to true to create pipeline without executing
-  enable_caching: false            # Enable step caching for faster re-runs
-  auto_approve_models: false       # Auto-approve registered models (use with caution)
-  
-  # Model approval strategy
-  approval_strategy: "quality_gated"  # "always", "never", "quality_gated"
-  # "always" - Auto-approve all models (for testing)
-  # "never" - Manual approval required for all models
-  # "quality_gated" - Smart approval based on quality thresholds
+  enable_caching: true            # Enable step caching for faster re-runs
 
   name: "yolo-training-pipeline-object-detection"
   training_step_name: "YOLOTrainingStep-ObjectDetection"
   registration_step_name: "YOLOModelRegistrationStep-ObjectDetection"
   model_package_group_name: "yolo-model-package-group-object-detection"
+  execution_name: "yolo-pipeline-execution-object-detection"
+
+
+# Runtime Configuration
+runtime:
+  wait_for_completion: true        # Wait for pipeline execution to complete
+  show_logs: true                  # Show CloudWatch logs during execution
+  display_metrics: true            # Display metrics after execution
 
 
 # Model Registry Configuration
-approval:
-  # These determine which models get auto-approved for deployment
-  quality_gates:
-    min_mAP_0_5: 0.001     
-    # min_precision: 0.1       
-    # min_recall: 0.1          
-    # max_model_size_mb: 400   
-    # max_inference_time_ms: 80 
-  
-  # Approval behavior settings
-  require_all_thresholds: false    # All thresholds must pass (vs any)
-  allow_manual_override: true     # Allow manual approval even if quality gates fail
+registry:
+  max_results: 50                # Maximum number of models to retrieve from registry
+  max_results_display: 20        # Maximum number of models to display in list
+  evaluation_metrics_file: "evaluation_metrics.json"  # Name of metrics file in model artifacts
+  training_job_patterns:         # Patterns to identify training jobs in S3 paths
+    - "YOLOTraining"
+    - "pipelines-"
+  temp_files:
+    output_archive: "temp_output.tar.gz"      # Temporary file for downloading output artifacts
+    output_extract_dir: "temp_output_dir"     # Temporary directory for extracting output
+    model_archive: "model.tar.gz"             # Temporary file for downloading model artifacts
+    model_extract_dir: "./models"            # Directory for extracting and storing models
+
+  # Model Approval Configuration
+  approval:
+    # Model approval strategy
+    approval_strategy: "quality_gated"  # "always", "never", "quality_gated"
+    # "always" - Auto-approve all models (for testing)
+    # "never" - Manual approval required for all models
+    # "quality_gated" - Smart approval based on quality thresholds
+
+    # These determine which models get auto-approved for deployment
+    require_all_thresholds: false    # All thresholds must pass (vs any)
+    quality_gates:
+      min_mAP_0_5: 0.001     
+      # min_precision: 0.1       
+      # min_recall: 0.1          
+      # max_model_size_mb: 400   
+      # max_inference_time_ms: 80 
+
+    # Automatic approval/rejection settings
+    # Both false = manual approval for all models (default)
+    # auto_approve=true, auto_reject=false = auto-approve good models, manual review bad ones
+    # auto_approve=false, auto_reject=true = manual approve good models, auto-reject bad ones  
+    # Both true = fully automated (auto-approve good, auto-reject bad)
+    auto_approve_on_quality_gates: true  # Automatically approve models that pass quality gates
+    auto_reject_on_failure: true         # Automatically reject models that fail quality gates
 
 
 # Deployment Configuration
@@ -328,22 +353,6 @@ evaluation:
 
 
 
-  # Model Registry Configuration
-  registry:
-    max_results: 50                # Maximum number of models to retrieve from registry
-    max_results_display: 20        # Maximum number of models to display in list
-    evaluation_metrics_file: "evaluation_metrics.json"  # Name of metrics file in model artifacts
-    training_job_patterns:         # Patterns to identify training jobs in S3 paths
-      - "YOLOTraining"
-      - "pipelines-"
-    temp_files:
-      output_archive: "temp_output.tar.gz"      # Temporary file for downloading output artifacts
-      output_extract_dir: "temp_output_dir"     # Temporary directory for extracting output
-      model_archive: "model.tar.gz"             # Temporary file for downloading model artifacts
-      model_extract_dir: "./models"            # Directory for extracting and storing models
 
 
-# Runtime Configuration
-runtime:
-  wait_for_completion: true        # Wait for pipeline execution to complete
-  show_logs: true                  # Show CloudWatch logs during execution
+

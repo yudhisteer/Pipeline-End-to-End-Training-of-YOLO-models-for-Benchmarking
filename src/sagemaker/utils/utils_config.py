@@ -201,6 +201,12 @@ def load_training_config():
     return None
 
 
+def load_registry_config():
+    """Load registry configuration from config.yaml with fallbacks."""
+    config = load_config()
+    return config.get('registry', {})
+
+
 def load_ground_truth_config():
     """Load ground truth configuration from config.yaml with fallbacks."""
     config = load_config()

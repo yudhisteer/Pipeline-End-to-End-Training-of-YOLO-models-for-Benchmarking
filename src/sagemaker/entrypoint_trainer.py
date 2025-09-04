@@ -195,7 +195,6 @@ class YOLOSageMakerTrainer:
             
             # Get CloudWatch logs
             try:
-                import boto3
                 logs_client = boto3.client('logs', region_name=self.region)
                 
                 # Get the most recent log stream
@@ -372,8 +371,6 @@ class YOLOSageMakerTrainer:
             
             s3_client = boto3.client('s3', region_name=self.region)
             s3_client.upload_file(config_path, self.bucket, s3_config_key)
-            
-            print(f"Uploaded config.yaml to: s3://{self.bucket}/{s3_config_key}")
             
             # Create TrainingInput for config directory
             config_input = TrainingInput(
@@ -555,14 +552,13 @@ class YOLOSageMakerTrainer:
             s3_config_key = f"{self.prefix}/config/{config_dir_name}/config.yaml"
             s3_config_dir = f"s3://{self.bucket}/{self.prefix}/config/{config_dir_name}/"
             
-            print(f"Uploading config.yaml with execution ID for traceability...")
+            print(f"Uploading config.yaml.")
             print(f"  Local path: {config_path}")
             print(f"  S3 location: s3://{self.bucket}/{s3_config_key}")
             
             s3_client = boto3.client('s3', region_name=self.region)
             s3_client.upload_file(config_path, self.bucket, s3_config_key)
             
-            print(f"Successfully uploaded config.yaml to: s3://{self.bucket}/{s3_config_key}")
             print(f"  Execution ID: {execution_id}")
             print(f"  Timestamp: {self.timestamp}")
             
