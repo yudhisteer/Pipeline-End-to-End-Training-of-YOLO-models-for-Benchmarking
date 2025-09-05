@@ -168,9 +168,8 @@ class ConfigEditorApp(App):
         except ValueError:
             raise ValueError(f"Cannot convert '{input_value}' to {original_type.__name__}")
         
-        # Update the config using the path
-        self.set_nested_value(self.config_handler.config, self.current_path, new_value)
-        self.config_handler.save_config()
+        # Update the config using surgical approach
+        success = self.config_handler.update_parameter_surgically(self.current_path, new_value)
         
         # Update the current value and refresh the tree
         self.current_value = new_value
@@ -179,20 +178,6 @@ class ConfigEditorApp(App):
         tree.root.expand()
         self.populate_tree(tree.root, self.config_handler.config, [])
 
-    def set_nested_value(self, data, path, value):
-        """Set a value in nested dictionary/list structure using a path."""
-        current = data
-        for key in path[:-1]:
-            if isinstance(current, list):
-                current = current[int(key)]
-            else:
-                current = current[key]
-        
-        final_key = path[-1]
-        if isinstance(current, list):
-            current[int(final_key)] = value
-        else:
-            current[final_key] = value
 
 
 def main():
