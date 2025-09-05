@@ -171,13 +171,67 @@ class ConfigEditorApp(App):
         # Update the config using surgical approach
         success = self.config_handler.update_parameter_surgically(self.current_path, new_value)
         
-        # Update the current value and refresh the tree
+        # Update the current value and refresh the tree while preserving expansion state
         self.current_value = new_value
+        self.refresh_tree_preserving_state()
+
+    def get_expanded_paths(self, node, current_path=[]):
+        """Recursively collect all expanded node paths."""
+        expanded_paths = []
+        
+        if hasattr(node, 'is_expanded') and node.is_expanded and node.data:
+            expanded_paths.append(node.data["path"])
+        
+        if hasattr(node, 'children'):
+            for child in node.children:
+                expanded_paths.extend(self.get_expanded_paths(child, current_path))
+        
+        return expanded_paths
+
+    def expand_nodes_by_paths(self, node, target_paths):
+        """Recursively expand nodes based on their paths."""
+        if node.data and node.data["path"] in target_paths:
+            node.expand()
+        
+        if hasattr(node, 'children'):
+            for child in node.children:
+                self.expand_nodes_by_paths(child, target_paths)
+
+    def refresh_tree_preserving_state(self):
+        """Refresh the tree while preserving the expansion state."""
         tree = self.query_one("#config_tree", Tree)
+        
+        # Get currently expanded paths
+        expanded_paths = self.get_expanded_paths(tree.root)
+        
+        # Get the currently selected node path
+        selected_path = self.current_path if self.current_path else None
+        
+        # Clear and repopulate the tree
         tree.clear()
         tree.root.expand()
         self.populate_tree(tree.root, self.config_handler.config, [])
+        
+        # Restore expanded state
+        self.expand_nodes_by_paths(tree.root, expanded_paths)
+        
+        # Try to restore selection if possible
+        if selected_path:
+            self.select_node_by_path(tree.root, selected_path)
 
+    def select_node_by_path(self, node, target_path):
+        """Recursively find and select a node by its path."""
+        if node.data and node.data["path"] == target_path:
+            tree = self.query_one("#config_tree", Tree)
+            tree.select_node(node)
+            return True
+        
+        if hasattr(node, 'children'):
+            for child in node.children:
+                if self.select_node_by_path(child, target_path):
+                    return True
+        
+        return False
 
 
 def main():
