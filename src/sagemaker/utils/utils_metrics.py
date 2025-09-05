@@ -55,7 +55,7 @@ def get_training_job_details(job_name: str) -> dict:
         return sm.describe_training_job(TrainingJobName=job_name)
     except Exception as e:
         console.print(
-            f"[bold red]❌ Error:[/bold red] Training job '[yellow]{job_name}[/yellow]' not found: {e}"
+            f"[bold red]Error:[/bold red] Training job '[yellow]{job_name}[/yellow]' not found: {e}"
         )
         return None
 
@@ -73,7 +73,7 @@ def list_training_jobs(max_results: int = 10) -> dict:
     console = Console()
     sm = boto3.client("sagemaker")
 
-    console.print("\n[bold blue]📋 Recent Training Jobs[/bold blue]", style="bold")
+    console.print("\n[bold blue]Recent Training Jobs[/bold blue]", style="bold")
 
     with Progress(
         SpinnerColumn(),
@@ -148,7 +148,7 @@ def list_all_training_jobs_with_metrics(max_results: int = 10) -> dict:
     sm = boto3.client("sagemaker")
 
     console.print(
-        "\n[bold blue]📋 Recent Training Jobs with Metrics[/bold blue]", style="bold"
+        "\n[bold blue]Recent Training Jobs with Metrics[/bold blue]", style="bold"
     )
 
     with Progress(
@@ -273,7 +273,7 @@ def list_specific_job_with_metrics(job_details: dict) -> None:
     if not job_details:
         console.print(
             Panel(
-                "[red]❌ No job details provided[/red]",
+                "[red]No job details provided[/red]",
                 title="[red]Error[/red]",
                 border_style="red",
             )
@@ -281,14 +281,14 @@ def list_specific_job_with_metrics(job_details: dict) -> None:
         return
 
     console.print(
-        f"\n[bold yellow]🔍 Attempting to extract metrics from S3 artifacts...[/bold yellow]"
+        f"\n[bold yellow]Attempting to extract metrics from S3 artifacts...[/bold yellow]"
     )
     try:
         s3_uri = job_details["ModelArtifacts"]["S3ModelArtifacts"]
         metrics = extract_metrics_from_s3(s3_uri, console)
 
         if metrics:
-            console.print(f"\n[bold green]📊 Extracted Training Metrics[/bold green]")
+            console.print(f"\n[bold green]Extracted Training Metrics[/bold green]")
 
             # create metrics table for final epoch
             final_metrics_table = Table(title="Final Epoch Metrics", box=box.ROUNDED)
@@ -307,7 +307,7 @@ def list_specific_job_with_metrics(job_details: dict) -> None:
             if "best_epoch_metrics" in metrics:
                 best_metrics = metrics["best_epoch_metrics"]
                 best_metrics_table = Table(
-                    title="🏆 Best Epoch Metrics (Highest mAP50)", box=box.ROUNDED
+                    title="Best Epoch Metrics (Highest mAP50)", box=box.ROUNDED
                 )
                 best_metrics_table.add_column("Metric", style="cyan")
                 best_metrics_table.add_column("Value", style="gold1", justify="right")
@@ -325,8 +325,8 @@ def list_specific_job_with_metrics(job_details: dict) -> None:
         else:
             console.print(
                 Panel(
-                    f"[yellow]⚠️ Could not extract metrics from S3 artifacts[/yellow]\n"
-                    f"[dim]📋 Manual extraction required from:[/dim]\n[blue]{s3_uri}[/blue]",
+                    f"[yellow]Could not extract metrics from S3 artifacts[/yellow]\n"
+                    f"[dim]Manual extraction required from:[/dim]\n[blue]{s3_uri}[/blue]",
                     title="[red]Extraction Failed[/red]",
                     border_style="red",
                 )
@@ -336,7 +336,7 @@ def list_specific_job_with_metrics(job_details: dict) -> None:
             Panel(
                 f"[red]Error extracting metrics: {e}[/red]\n"
                 f"[dim]Check S3 artifacts manually:[/dim]\n[blue]{job_details['ModelArtifacts']['S3ModelArtifacts']}[/blue]",
-                title="[red]❌ Extraction Error[/red]",
+                title="[red]Extraction Error[/red]",
                 border_style="red",
             )
         )
@@ -356,7 +356,7 @@ def extract_metrics_from_s3(s3_uri: str, console: Console) -> dict:
             console=console,
         ) as progress:
             download_task = progress.add_task(
-                f"📥 Downloading from s3://{bucket}/{key}", total=None
+                f"Downloading from s3://{bucket}/{key}", total=None
             )
 
             with tempfile.NamedTemporaryFile(
@@ -364,12 +364,9 @@ def extract_metrics_from_s3(s3_uri: str, console: Console) -> dict:
             ) as tmp_file:
                 s3.download_file(bucket, key, tmp_file.name)
                 progress.update(download_task, completed=True)
-                console.print(
-                    f"  [green]📦 Downloaded {os.path.getsize(tmp_file.name):,} bytes[/green]"
-                )
 
                 extract_task = progress.add_task(
-                    "🔍 Extracting and searching files...", total=None
+                    "Extracting and searching files...", total=None
                 )
 
                 with tarfile.open(tmp_file.name, "r:gz") as tar:
@@ -385,7 +382,7 @@ def extract_metrics_from_s3(s3_uri: str, console: Console) -> dict:
 
                     results_file = None
                     for member in tar.getmembers():
-                        file_type = "📁 Dir" if member.isdir() else "📄 File"
+                        file_type = "Dir" if member.isdir() else "File"
                         archive_table.add_row(member.name, file_type)
 
                         # look for results.csv which contains the actual training metrics
@@ -396,7 +393,7 @@ def extract_metrics_from_s3(s3_uri: str, console: Console) -> dict:
 
                     if results_file:
                         console.print(
-                            f"  [bold green]✅ Found results file:[/bold green] [yellow]{results_file.name}[/yellow]"
+                            f"  [bold green]Found results file:[/bold green] [yellow]{results_file.name}[/yellow]"
                         )
                         extracted_file = tar.extractfile(results_file)
                         if extracted_file:
@@ -435,7 +432,7 @@ def extract_metrics_from_s3(s3_uri: str, console: Console) -> dict:
                             metrics_data["best_epoch_metrics"] = best_metrics
 
                             console.print(
-                                f"\n  [bold gold1]🏆 Best Epoch (highest mAP50): \
+                                f"\n  [bold gold1]Best Epoch (highest mAP50): \
                                     {int(best_row.get('epoch', 0))}[/bold gold1]"
                             )
 
@@ -568,7 +565,7 @@ def generate_model_metrics(results, model_dir: str, config: Dict[str, Any] = Non
         )
         
         print(f"\nModel Quality Assessment:")
-        print(f"  Meets quality constraints: {'✅ YES' if meets_constraints else '❌ NO'}")
+        print(f"  Meets quality constraints: {'YES' if meets_constraints else 'NO'}")
         if not meets_constraints:
             print("  Issues found:")
             if current["mAP_0.5"] < constraints["min_mAP_0.5"]:
@@ -712,15 +709,15 @@ def get_training_job_config(training_job_name: str) -> str:
         # Extract execution ID from training job name
         # Training job names typically follow pattern: pipelines-{execution_id}-{step_name}-{suffix}
         if not training_job_name.startswith('pipelines-'):
-            return "❌ Training job name doesn't follow expected pipeline pattern (should start with 'pipelines-')"
+            return "Training job name doesn't follow expected pipeline pattern (should start with 'pipelines-')"
         
         # Extract execution ID (part between 'pipelines-' and the next '-')
         parts = training_job_name.split('-')
         if len(parts) < 2:
-            return "❌ Could not extract execution ID from training job name"
+            return "Could not extract execution ID from training job name"
         
         execution_id = parts[1]  # e.g., "fnthdyhhsm1z"
-        print(f"🔍 Extracted execution ID: {execution_id}")
+        print(f"Extracted execution ID: {execution_id}")
         
         # Load AWS config
         try:
@@ -766,10 +763,10 @@ def get_training_job_config(training_job_name: str) -> str:
                                 config_response = s3_client.get_object(Bucket=bucket, Key=key)
                                 config_content = config_response['Body'].read().decode('utf-8')
                                 found_config_path = key
-                                print(f"✅ Found config with execution ID {execution_id}: s3://{bucket}/{key}")
+                                print(f"Found config with execution ID {execution_id}: s3://{bucket}/{key}")
                                 break
                             except Exception as e:
-                                print(f"⚠️  Could not download config from {key}: {e}")
+                                print(f" Could not download config from {key}: {e}")
                                 continue
                 
                 if not config_content:
@@ -782,22 +779,22 @@ def get_training_job_config(training_job_name: str) -> str:
                             config_dirs.add(dir_path)
                     
                     if config_dirs:
-                        return f"❌ Config not found for execution ID '{execution_id}'. Available config directories:\n" \
+                        return f"Config not found for execution ID '{execution_id}'. Available config directories:\n" \
                                f"   {chr(10).join(f'   • s3://{bucket}/{d}' for d in sorted(config_dirs))}"
                     else:
-                        return f"❌ No config directories found in s3://{bucket}/{config_prefix}"
+                        return f"No config directories found in s3://{bucket}/{config_prefix}"
             else:
-                return f"❌ No objects found in config directory: s3://{bucket}/{config_prefix}"
+                return f"No objects found in config directory: s3://{bucket}/{config_prefix}"
                 
         except Exception as e:
-            return f"❌ Error searching S3 for config: {str(e)}"
+            return f"Error searching S3 for config: {str(e)}"
         
         if config_content:
             return config_content
         else:
-            return f"❌ Config not found for execution ID '{execution_id}' in s3://{bucket}/{config_prefix}"
+            return f"Config not found for execution ID '{execution_id}' in s3://{bucket}/{config_prefix}"
                    
     except Exception as e:
-        return f"❌ Error retrieving config: {str(e)}"
+        return f"Error retrieving config: {str(e)}"
 
 

@@ -7,6 +7,7 @@ import warnings
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+from rich import print
 from sagemaker.workflow.pipeline import Pipeline
 from sagemaker.workflow.steps import TrainingStep, CacheConfig
 from sagemaker.workflow.step_collections import RegisterModel
@@ -215,14 +216,21 @@ class YOLOSageMakerPipeline:
                 if approval_config.get('auto_approve_on_quality_gates'):
                     # Automatically approve the model
                     approval_description = f"Automatically approved - passed all quality gates: {validation_report['gates_passed']}"
-                    approval_result = update_model_package_approval(
-                        training_job_name=training_job_name,
-                        model_package_group_name=model_package_group,
-                        approval_status='Approved',
-                        approval_description=approval_description
-                    )
-                    validation_report['approval_result'] = approval_result
-                    validation_report['action_taken'] = 'AUTO_APPROVED'
+                    try:
+                        approval_result = update_model_package_approval(
+                            training_job_name=training_job_name,
+                            model_package_group_name=model_package_group,
+                            approval_status='Approved',
+                            approval_description=approval_description
+                        )
+                        validation_report['approval_result'] = approval_result
+                        validation_report['action_taken'] = 'AUTO_APPROVED'
+                        validation_report['action_needed'] = 'Model automatically approved - ready for deployment'
+                    except Exception as e:
+                        print(f"Failed to update model package approval: {e}")
+                        validation_report['action_taken'] = 'AUTO_APPROVE_FAILED'
+                        validation_report['action_needed'] = f'Failed to auto-approve: {str(e)} - Manual approval required'
+                        validation_report['approval_error'] = str(e)
                 else:
                     # model passes gates but requires manual approval
                     validation_report['recommendation'] = 'APPROVE'
@@ -232,14 +240,21 @@ class YOLOSageMakerPipeline:
                 # model failed quality gates and auto reject is true
                 if approval_config.get('auto_reject_on_failure'):
                     approval_description = f"Automatically rejected - failed quality gates: {validation_report['gates_passed']}"
-                    approval_result = update_model_package_approval(
-                        training_job_name=training_job_name,
-                        model_package_group_name=model_package_group,
-                        approval_status='Rejected',
-                        approval_description=approval_description
-                    )
-                    validation_report['approval_result'] = approval_result
-                    validation_report['action_taken'] = 'AUTO_REJECTED'
+                    try:
+                        approval_result = update_model_package_approval(
+                            training_job_name=training_job_name,
+                            model_package_group_name=model_package_group,
+                            approval_status='Rejected',
+                            approval_description=approval_description
+                        )
+                        validation_report['approval_result'] = approval_result
+                        validation_report['action_taken'] = 'AUTO_REJECTED'
+                        validation_report['action_needed'] = 'Model automatically rejected due to failed quality gates'
+                    except Exception as e:
+                        print(f"Failed to update model package approval: {e}")
+                        validation_report['action_taken'] = 'AUTO_REJECT_FAILED'
+                        validation_report['action_needed'] = f'Failed to auto-reject: {str(e)} - Manual rejection required'
+                        validation_report['approval_error'] = str(e)
                 else:
                     # model failed and auto reject is false
                     validation_report['recommendation'] = 'REJECT'
@@ -365,7 +380,14 @@ class YOLOSageMakerPipeline:
                 print(f"\nPipeline execution failed. Skipping metrics extraction.")
                 self._display_training_failure_logs_from_execution(execution)
         else:
-            print(f"Pipeline execution started. Monitor progress in SageMaker console.")
+            print(f"Wait for completion is false. Pipeline execution started. Monitor progress in SageMaker console.")
+            return {
+                "pipeline_name": self.pipeline_name,
+                "execution_arn": execution.arn,
+                "timestamp": self.timestamp,
+                "model_package_group": self.model_package_group_name,
+                "execution": execution
+            }
         
         print("\n" + "="*60)
         print("PIPELINE EXECUTION COMPLETE")
@@ -595,9 +617,13 @@ def main():
             # Run complete pipeline
             result = pipeline.run_pipeline(wait_for_completion=wait_for_completion)
             
+            # Only show results and quality gates if we waited for completion
+            if not wait_for_completion:
+                return  # Exit early, don't print final results
+            
             # Check quality gates if using quality_gated strategy and pipeline completed
             approval_strategy = pipeline_config.get('approval_strategy', 'quality_gated')
-            if approval_strategy == 'quality_gated' and wait_for_completion:
+            if approval_strategy == 'quality_gated':
                 # Get execution object and check its actual status
                 execution = result.get('execution')
                 if execution:

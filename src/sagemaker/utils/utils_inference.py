@@ -35,13 +35,13 @@ def list_local_models():
                         onnx_files.append(os.path.join(root, file))
             
             if onnx_files:
-                print(f"✅ {item}")
+                print(f"{item}")
                 for onnx_file in onnx_files:
                     # get relative path from models directory
                     rel_path = os.path.relpath(onnx_file, models_dir)
                     print(f"   📄 {rel_path}")
             else:
-                print(f"⚠️  {item} (no ONNX file found)")
+                print(f" {item} (no ONNX file found)")
     
     print("=" * 50)
 

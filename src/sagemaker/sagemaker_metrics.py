@@ -44,7 +44,7 @@ def display_training_job_config(training_job_name: str):
         
         # Display config in a nice panel
         console.print(Panel(
-            f"[bold green]✅ Pipeline Training Config.yaml[/bold green]\n"
+            f"[bold green]Pipeline Training Config.yaml[/bold green]\n"
             f"[dim]Training Job: {training_job_name}[/dim]",
             title="[bold blue]📋 Pipeline Training Configuration[/bold blue]",
             border_style="blue",
@@ -57,7 +57,7 @@ def display_training_job_config(training_job_name: str):
         
     except yaml.YAMLError as e:
         # If YAML parsing fails, display as plain text
-        console.print(f"[bold yellow]⚠️  Config is not valid YAML:[/bold yellow] {e}")
+        console.print(f"[bold yellow] Config is not valid YAML:[/bold yellow] {e}")
         console.print(f"[dim]Displaying as plain text:[/dim]")
         console.print(config_content)
 
@@ -81,7 +81,7 @@ def display_training_job_metrics(
     
     if training_job_name:
         # Display metrics for specific job only if requested
-        console.print(f"[bold cyan]🎯 Displaying information for:[/bold cyan] [yellow]{training_job_name}[/yellow]\n")
+        console.print(f"[bold cyan] Displaying information for:[/bold cyan] [yellow]{training_job_name}[/yellow]\n")
         job_details = get_training_job_details(training_job_name)
         if job_details:
             # Only show metrics if explicitly requested
@@ -177,7 +177,7 @@ def main():
     ))
     
     if args.job_name:
-        console.print(f"[bold cyan]🔍 Looking for job:[/bold cyan] [yellow]{args.job_name}[/yellow]\n")
+        console.print(f"[bold cyan]Looking for job:[/bold cyan] [yellow]{args.job_name}[/yellow]\n")
         display_training_job_metrics(
             args.job_name, 
             show_metrics=args.metrics, 

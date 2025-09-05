@@ -10,13 +10,15 @@ from sagemaker.workflow.pipeline_context import PipelineSession
 from sagemaker.processing import ScriptProcessor
 from sagemaker.processing import ProcessingInput, ProcessingOutput
 
+import yaml
+from dotenv import load_dotenv
+
 class MinimalYOLOEvaluationPipeline:
     """Minimal YOLO evaluation pipeline."""
     
     def __init__(self, config_path: str = "config.yaml"):
+
         # Load config
-        import yaml
-        from dotenv import load_dotenv
         load_dotenv()
         
         # Load and expand config
@@ -113,7 +115,7 @@ class MinimalYOLOEvaluationPipeline:
             )
             print("✓ Config file will be uploaded")
         else:
-            print("⚠️ Local config.yaml not found - will use defaults in processing job")
+            print("Local config.yaml not found - will use defaults in processing job")
         
         # Define output
         output_s3 = f"s3://{self.bucket}/{self.prefix}/results/{self.timestamp}"

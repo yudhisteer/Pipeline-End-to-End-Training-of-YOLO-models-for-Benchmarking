@@ -58,7 +58,7 @@ def convert_csv_to_yolo(csv_path, images_dir, labels_dir, class_id=0):
             # No annotations: create empty file
             open(label_path, 'w').close()
 
-    print(f"✅ Labels saved to {labels_dir}")
+    print(f"Labels saved to {labels_dir}")
 
 def rename_dataset_structure():
     val_old = "dataset/validation"
@@ -67,7 +67,7 @@ def rename_dataset_structure():
         if os.path.exists(val_new):
             shutil.rmtree(val_new)
         os.rename(val_old, val_new)
-        print(f"📂 Renamed {val_old} -> {val_new}")
+        print(f"Renamed {val_old} -> {val_new}")
 
 
     for split in ["dataset/train", "dataset/val"]:
@@ -77,7 +77,7 @@ def rename_dataset_structure():
             if os.path.exists(images_dir):
                 shutil.rmtree(images_dir)
             os.rename(data_dir, images_dir)
-            print(f"📂 Renamed {data_dir} -> {images_dir}")
+            print(f"Renamed {data_dir} -> {images_dir}")
 
 
 if __name__ == "__main__":
