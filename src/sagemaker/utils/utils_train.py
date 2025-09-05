@@ -14,6 +14,75 @@ from utils.utils_s3 import parse_s3_uri, object_exists
 from utils.utils_metrics import list_specific_job_with_metrics
 
 
+def get_sagemaker_metric_definitions(task_type: str = "object_detection") -> list:
+    """
+    Get CloudWatch metric definitions for SageMaker training jobs.
+    
+    Args:
+        task_type: Type of YOLO task ("object_detection", "keypoint_detection", etc.)
+        
+    Returns:
+        List of metric definitions for SageMaker CloudWatch
+    """
+    if task_type == "object_detection":
+        return [
+            {
+                "Name": "yolo:recall",
+                "Regex": r"recall: ([0-9]*\.?[0-9]+)"
+            },
+            {
+                "Name": "yolo:mAP_0.5",
+                "Regex": r"mAP@0\.5: ([0-9\.]+)"
+            },
+            {
+                "Name": "yolo:mAP_0.5_0.95",
+                "Regex": r"mAP@0\.5:0\.95: ([0-9\.]+)"
+            },
+            {
+                "Name": "yolo:precision",
+                "Regex": r"precision: ([0-9\.]+)"
+            },
+            {
+                "Name": "yolo:train_loss",
+                "Regex": r"train/box_loss: ([0-9\.]+)"
+            },
+            {
+                "Name": "yolo:val_loss",
+                "Regex": r"val/box_loss: ([0-9\.]+)"
+            }
+        ]
+    elif task_type == "keypoint_detection":
+        # Keypoint detection metrics
+        return [
+            {
+                "Name": "yolo:recall",
+                "Regex": r"recall: ([0-9]*\.?[0-9]+)"
+            },
+            {
+                "Name": "yolo:mAP_0.5",
+                "Regex": r"mAP@0\.5: ([0-9\.]+)"
+            },
+            {
+                "Name": "yolo:mAP_0.5_0.95",
+                "Regex": r"mAP@0\.5:0\.95: ([0-9\.]+)"
+            },
+            {
+                "Name": "yolo:precision",
+                "Regex": r"precision: ([0-9\.]+)"
+            },
+            {
+                "Name": "yolo:train_loss",
+                "Regex": r"train/pose_loss: ([0-9\.]+)"
+            },
+            {
+                "Name": "yolo:val_loss",
+                "Regex": r"val/pose_loss: ([0-9\.]+)"
+            }
+        ]
+    else:
+        # Default to object detection metrics
+        return get_sagemaker_metric_definitions("object_detection")
+
 
 def list_registry_models():
     # This func may not work.

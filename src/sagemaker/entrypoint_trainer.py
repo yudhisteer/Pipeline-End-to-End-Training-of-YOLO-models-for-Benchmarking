@@ -22,6 +22,7 @@ from utils.utils_config import (
     get_training_config,
     get_hyperparameters_config,
 )
+from utils.utils_train import get_sagemaker_metric_definitions
 from sagemaker_metrics import display_training_job_metrics
 
 
@@ -256,12 +257,9 @@ class YOLOSageMakerTrainer:
             print("\n" + "="*60)
             print("EXTRACTING TRAINING METRICS")
             print("="*60)
-            print(f"Found training job: {training_job_name}")
-            print("Extracting metrics...")
+            print(f"Training job: {training_job_name}")
             print("-" * 60)
 
-            # Import here to avoid circular imports
-            from sagemaker_metrics import display_training_job_metrics
             display_training_job_metrics(training_job_name, show_metrics=True)
 
         except ImportError as e:
@@ -270,7 +268,7 @@ class YOLOSageMakerTrainer:
         except Exception as e:
             print(f"Error displaying training metrics: {e}")
             print("You can manually check metrics using:")
-            print("  python src/sagemaker/sagemaker_metrics.py [training_job_name]")
+            print(f"  python src/sagemaker/sagemaker_metrics.py {training_job_name}")
     
     def create_estimator(self, verbose: bool = True) -> PyTorch:
         """Create and configure the PyTorch estimator for YOLO training.
@@ -284,34 +282,9 @@ class YOLOSageMakerTrainer:
         volume_size = self.training_config.get('volume_size', 50)
         max_run = self.training_config.get('max_run', 86400)  # 24 hours default
         
-        # Metric definitions for CloudWatch
-        # TODO: parametrize for keypoint detection
-        metric_definitions = [
-            {
-                "Name": "yolo:recall",
-                "Regex": r"recall: ([0-9]*\.?[0-9]+)"
-            },
-            {
-                "Name": "yolo:mAP_0.5",
-                "Regex": r"mAP@0\.5: ([0-9\.]+)"
-            },
-            {
-                "Name": "yolo:mAP_0.5_0.95",
-                "Regex": r"mAP@0\.5:0\.95: ([0-9\.]+)"
-            },
-            {
-                "Name": "yolo:precision",
-                "Regex": r"precision: ([0-9\.]+)"
-            },
-            {
-                "Name": "yolo:train_loss",
-                "Regex": r"train/box_loss: ([0-9\.]+)"
-            },
-            {
-                "Name": "yolo:val_loss",
-                "Regex": r"val/box_loss: ([0-9\.]+)"
-            }
-        ]
+        # Get metric definitions based on task type
+        task_type = self.training_config.get('task_type', 'object_detection')
+        metric_definitions = get_sagemaker_metric_definitions(task_type)
         
         # Create PyTorch estimator
         self.estimator = PyTorch(
@@ -456,7 +429,7 @@ class YOLOSageMakerTrainer:
             # Display metrics if enabled
             if self.runtime_config.get('display_metrics', True):
                 training_job_name = self.estimator.latest_training_job.name
-                self._display_training_metrics(training_job_name)
+                self.display_training_metrics(training_job_name)
         else:
             print(f"Training job started. Monitor progress in SageMaker console.")
             print(f"  Job name: {self.estimator.latest_training_job.name}")
@@ -464,24 +437,6 @@ class YOLOSageMakerTrainer:
         
         return self.estimator
     
-    def _display_training_metrics(self, training_job_name: str):
-        """Display training metrics for the completed job."""
-        try:
-            print("\n" + "="*60)
-            print("EXTRACTING TRAINING METRICS")
-            print("="*60)
-            print(f"Training job: {training_job_name}")
-            print("-" * 60)
-            
-            display_training_job_metrics(training_job_name, show_metrics=True)
-            
-        except ImportError as e:
-            print(f"Could not import sagemaker_metrics: {e}")
-            print("Please ensure sagemaker_metrics.py is available.")
-        except Exception as e:
-            print(f"Error displaying training metrics: {e}")
-            print("You can manually check metrics using:")
-            print(f"  python src/sagemaker/sagemaker_metrics.py {training_job_name}")
     
     def run_training(self, wait_for_completion: bool = None, job_name: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -516,17 +471,6 @@ class YOLOSageMakerTrainer:
             "timestamp": self.timestamp,
             "s3_model_output": self.s3_model_output
         }
-
-    def get_config_s3_path(self) -> Optional[str]:
-        """
-        Get the current S3 path where config.yaml is stored.
-        
-        Returns:
-            S3 path to config.yaml directory, or None if not uploaded
-        """
-        if hasattr(self, '_config_s3_path'):
-            return self._config_s3_path
-        return None
     
     def upload_config_with_execution_id(self, execution_id: str) -> bool:
         """
