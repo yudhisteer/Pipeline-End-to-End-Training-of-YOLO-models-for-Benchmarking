@@ -100,6 +100,7 @@ class ConfigEditorApp(App):
                 input_widget = Select(
                     options=[("true", True), ("false", False)],
                     value=self.current_value,
+                    allow_blank=False,
                     id="param_input"
                 )
                 type_info = "Boolean (true/false)"
@@ -174,6 +175,9 @@ class ConfigEditorApp(App):
         if isinstance(input_widget, Select):
             # For Select widgets (boolean values)
             new_value = input_widget.value
+            # Validate that we have a proper boolean value
+            if new_value is None or not isinstance(new_value, bool):
+                raise ValueError("Please select either 'true' or 'false'")
         else:
             # For Input widgets (text, int, float)
             input_value = input_widget.value.strip()
