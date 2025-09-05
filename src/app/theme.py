@@ -73,6 +73,42 @@ Input:focus {
     border: solid #a6e22e;
 }
 
+Select {
+    margin: 0 1 1 1;
+    background: #3e3d32;
+    color: #f8f8f2;
+    border: solid #75715e;
+}
+
+Select:focus {
+    border: solid #a6e22e;
+}
+
+SelectOverlay {
+    background: #3e3d32;
+    color: #f8f8f2;
+    border: solid #75715e;
+}
+
+OptionList {
+    background: #3e3d32;
+    color: #f8f8f2;
+}
+
+OptionList > .option-list--option {
+    background: #3e3d32;
+    color: #f8f8f2;
+}
+
+OptionList > .option-list--option:hover {
+    background: #49483e;
+}
+
+OptionList > .option-list--option-selected {
+    background: #a6e22e;
+    color: #272822;
+}
+
 Button {
     margin: 1 1 0 1;
     background: #49483e;

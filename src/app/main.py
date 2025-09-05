@@ -1,6 +1,6 @@
 """Main configuration editor application."""
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Tree, Label, Input, Button, Static
+from textual.widgets import Header, Footer, Tree, Label, Input, Button, Static, Select
 from textual.containers import Container, Vertical, Horizontal, ScrollableContainer
 from .config_handler import ConfigHandler
 from .theme import MONOKAI_THEME
@@ -94,26 +94,44 @@ class ConfigEditorApp(App):
             path_str = " → ".join(map(str, self.current_path))
             param_name = self.current_path[-1] if self.current_path else "Unknown"
             
-            # Determine the input type based on the current value
+            # Create appropriate input widget based on the current value type
             if isinstance(self.current_value, bool):
-                placeholder = "true/false"
+                # Use Select widget for boolean values
+                input_widget = Select(
+                    options=[("true", True), ("false", False)],
+                    value=self.current_value,
+                    id="param_input"
+                )
+                type_info = "Boolean (true/false)"
             elif isinstance(self.current_value, int):
-                placeholder = "Integer value"
+                input_widget = Input(
+                    value=str(self.current_value),
+                    placeholder="Integer value",
+                    id="param_input"
+                )
+                type_info = "Integer"
             elif isinstance(self.current_value, float):
-                placeholder = "Float value"
+                input_widget = Input(
+                    value=str(self.current_value),
+                    placeholder="Float value",
+                    id="param_input"
+                )
+                type_info = "Float"
             else:
-                placeholder = "Text value"
+                input_widget = Input(
+                    value=str(self.current_value),
+                    placeholder="Text value",
+                    id="param_input"
+                )
+                type_info = "Text"
             
             edit_panel.mount(
                 Vertical(
                     Label(f"Editing: {path_str}", classes="section"),
                     Label(f"Parameter: {param_name}"),
+                    Label(f"Type: {type_info}"),
                     Label(f"Current value: {self.current_value}"),
-                    Input(
-                        value=str(self.current_value),
-                        placeholder=placeholder,
-                        id="param_input"
-                    ),
+                    input_widget,
                     Horizontal(
                         Button("Save", variant="success", id="save"),
                         Button("Reset", id="reset"),
@@ -137,7 +155,10 @@ class ConfigEditorApp(App):
             # Reset the input to the original value
             if self.current_value is not None:
                 input_widget = self.query_one("#param_input")
-                input_widget.value = str(self.current_value)
+                if isinstance(input_widget, Select):
+                    input_widget.value = self.current_value
+                else:
+                    input_widget.value = str(self.current_value)
         
         elif event.button.id == "exit":
             self.exit()
@@ -148,25 +169,32 @@ class ConfigEditorApp(App):
             return
         
         input_widget = self.query_one("#param_input")
-        input_value = input_widget.value.strip()
         
-        if not input_value:
-            return
-        
-        # Convert the input value to the appropriate type
-        original_type = type(self.current_value)
-        
-        try:
-            if original_type == bool:
-                new_value = input_value.lower() in ('true', 'yes', '1', 'on')
-            elif original_type == int:
-                new_value = int(input_value)
-            elif original_type == float:
-                new_value = float(input_value)
-            else:
-                new_value = input_value
-        except ValueError:
-            raise ValueError(f"Cannot convert '{input_value}' to {original_type.__name__}")
+        # Handle different widget types
+        if isinstance(input_widget, Select):
+            # For Select widgets (boolean values)
+            new_value = input_widget.value
+        else:
+            # For Input widgets (text, int, float)
+            input_value = input_widget.value.strip()
+            
+            if not input_value and not isinstance(self.current_value, bool):
+                return
+            
+            # Convert the input value to the appropriate type
+            original_type = type(self.current_value)
+            
+            try:
+                if original_type == bool:
+                    new_value = input_value.lower() in ('true', 'yes', '1', 'on')
+                elif original_type == int:
+                    new_value = int(input_value)
+                elif original_type == float:
+                    new_value = float(input_value)
+                else:
+                    new_value = input_value
+            except ValueError:
+                raise ValueError(f"Cannot convert '{input_value}' to {original_type.__name__}")
         
         # Update the config using surgical approach
         success = self.config_handler.update_parameter_surgically(self.current_path, new_value)
