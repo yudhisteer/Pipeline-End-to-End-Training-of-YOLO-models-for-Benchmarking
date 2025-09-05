@@ -15,7 +15,7 @@ from sagemaker.workflow.pipeline_context import PipelineSession
 from sagemaker.model_metrics import ModelMetrics, MetricsSource
 
 from utils.utils_config import load_config, get_validation_config
-from utils.utils_train import extract_evaluation_from_training_job, validate_model_quality, update_model_package_approval
+from utils.utils_train import extract_evaluation_from_training_job, validate_model_quality, update_model_package_approval, check_and_display_quality_gates
 from entrypoint_trainer import YOLOSageMakerTrainer
 from sagemaker_metrics import display_training_job_metrics
 
@@ -386,6 +386,7 @@ class YOLOSageMakerPipeline:
                 "execution_arn": execution.arn,
                 "timestamp": self.timestamp,
                 "model_package_group": self.model_package_group_name,
+                "training_job_name": None,  # Not available when not waiting for completion
                 "execution": execution
             }
         
@@ -393,11 +394,15 @@ class YOLOSageMakerPipeline:
         print("PIPELINE EXECUTION COMPLETE")
         print("="*60)
         
+        # Extract training job name for result
+        training_job_name = self._get_training_job_name_from_execution(execution)
+        
         return {
             "pipeline_name": self.pipeline_name,
             "execution_arn": execution.arn,
             "timestamp": self.timestamp,
             "model_package_group": self.model_package_group_name,
+            "training_job_name": training_job_name,
             "execution": execution  # Add execution object for quality gate checking
         }
     
@@ -611,6 +616,7 @@ def main():
                 "pipeline_name": pipeline.pipeline_name,
                 "timestamp": pipeline.timestamp,
                 "model_package_group": pipeline.model_package_group_name,
+                "training_job_name": None,  # Not available in dry run mode
                 "status": "dry_run_completed"
             }
         else:
@@ -627,67 +633,19 @@ def main():
                 # Get execution object and check its actual status
                 execution = result.get('execution')
                 if execution:
-                    try:
-                        execution_status = execution.describe().get('PipelineExecutionStatus', 'Unknown')
-                        if execution_status == 'Succeeded':
-                            print(f"\nChecking quality gates for approval...")
-                            approval_result = pipeline.update_model_approval_after_training(execution)
-                            print(f"\nQuality Gate Results:")
-                            if approval_result.get('overall_pass'):
-                                print(f"Status: PASSED")
-                                print(f"Gates passed: {approval_result.get('gates_passed', 'N/A')}")
-                                print(f"Recommendation: {approval_result.get('recommendation', 'N/A')}")
-                            else:
-                                print(f"Status: FAILED")
-                                print(f"Gates passed: {approval_result.get('gates_passed', 'N/A')}")
-                                print(f"Recommendation: {approval_result.get('recommendation', 'N/A')}")
-                            
-                            # Display quality gate comparison table
-                            detailed_results = approval_result.get('detailed_results', {})
-                            if detailed_results:
-                                print("\nQuality Gate Comparison:")
-                                print("-" * 70)
-                                print(f"{'Gate':<20} {'Required':<12} {'Actual':<12} {'Status':<10} {'Gap':<10}")
-                                print("-" * 70)
-                                
-                                for gate_name, gate_info in detailed_results.items():
-                                    threshold = gate_info.get('threshold', 'N/A')
-                                    actual = gate_info.get('actual', 'N/A')
-                                    passes = gate_info.get('passes', False)
-                                    
-                                    # Format values
-                                    if isinstance(threshold, (int, float)) and isinstance(actual, (int, float)):
-                                        threshold_str = f"{threshold:.3f}"
-                                        actual_str = f"{actual:.3f}"
-                                        gap = actual - threshold if gate_name.startswith('min_') else threshold - actual
-                                        gap_str = f"{gap:+.3f}"
-                                    else:
-                                        threshold_str = str(threshold)
-                                        actual_str = str(actual)
-                                        gap_str = "N/A"
-                                    
-                                    status_str = "PASS" if passes else "FAIL"
-                                    display_name = gate_name.replace('min_', '').replace('_', ' ').title()
-                                    
-                                    print(f"{display_name:<20} {threshold_str:<12} {actual_str:<12} {status_str:<10} {gap_str:<10}")
-                                
-                                print("-" * 70)
-                            
-                            print(f"Action needed: {approval_result.get('action_needed', 'N/A')}")
-                            result['quality_gates'] = approval_result
-                        else:
-                            print(f"\nPipeline status is {execution_status} - skipping quality gate checks")
-                    except Exception as e:
-                        print(f"Quality gate checking failed: {e}")
+                    approval_result = check_and_display_quality_gates(pipeline, execution, pipeline_config)
+                    result['quality_gates'] = approval_result
                 else:
                     print("Could not access execution for quality gate checking")
         
         print(f"\n" + "="*60)
         print("FINAL RESULTS")
         print("="*60)
+        print("Job name: ", result.get('training_job_name'))
         for key, value in result.items():
             if key not in ['quality_gates', 'execution']:  # Don't print complex objects
                 print(f"{key}: {value}")
+
         print("="*60)
     
     except Exception as e:

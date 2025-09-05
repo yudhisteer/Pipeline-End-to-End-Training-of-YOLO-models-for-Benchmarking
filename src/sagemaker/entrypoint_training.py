@@ -6,6 +6,7 @@ Handles config.yaml with fallback to command-line arguments.
 import os
 from ultralytics import YOLO
 import boto3
+from rich import print
 
 
 from utils.utils_metrics import (
@@ -95,7 +96,7 @@ def main():
     # Add all hyperparams from config directly
     hyperparams.update(training_hyperparams)
 
-    print("Hyperparameters for training:")
+    print("Hyperparameters used for training:")
     for key, value in hyperparams.items():
         print(f"  {key}: {value}")
     
@@ -103,6 +104,8 @@ def main():
     
     # Train model
     results = model.train(**hyperparams)
+    print("DEBUG: Results:")
+    print(results)
     print("Training completed!!!")
     
     # Generate metrics and export model

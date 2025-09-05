@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+from rich import print
 import sagemaker
 from sagemaker.pytorch import PyTorch
 from sagemaker.inputs import TrainingInput

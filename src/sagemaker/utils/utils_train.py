@@ -339,10 +339,37 @@ def validate_model_quality(training_job_name: str, quality_gates: dict, require_
         Exception: For errors in extracting evaluation data or processing quality gates
     """
     try:
-        # Extract evaluation data from training job using utility function
-        evaluation_data = extract_evaluation_from_training_job(training_job_name)
-        metrics = evaluation_data.get('metrics', {})
-        model_info = evaluation_data.get('model_info', {})
+        # Extract metrics directly from S3 (same method as the display table)
+        # Get training job details to extract S3 URI
+        sagemaker_client = boto3.client('sagemaker')
+        job_details = sagemaker_client.describe_training_job(TrainingJobName=training_job_name)
+        s3_uri = job_details["ModelArtifacts"]["S3ModelArtifacts"]
+        
+        # Import extract_metrics_from_s3 and Console
+        from rich.console import Console
+        from .utils_metrics import extract_metrics_from_s3
+        
+        # Use the same extraction method as the display table
+        console = Console()
+        s3_metrics = extract_metrics_from_s3(s3_uri, console)
+        
+        if s3_metrics:
+            # Convert S3 metrics to the format expected by quality gates
+            metrics = {
+                "mAP_0_5": float(s3_metrics.get("mAP50", 0.0)),
+                "mAP_0_5_0_95": float(s3_metrics.get("mAP50-95", 0.0)), 
+                "precision": float(s3_metrics.get("precision", 0.0)),
+                "recall": float(s3_metrics.get("recall", 0.0)),
+            }
+            model_info = {"model_size_mb": 0.0}  # Placeholder
+        else:
+            # Fallback to evaluation.json approach
+            evaluation_data = extract_evaluation_from_training_job(training_job_name)
+            
+            # Handle nested structure from generate_model_metrics function
+            nested_metrics = evaluation_data.get('metrics', {})
+            metrics = nested_metrics if nested_metrics else evaluation_data
+            model_info = evaluation_data.get('model_info', {})
         
         # Check each quality gate dynamically
         validation_results = {}
@@ -351,8 +378,8 @@ def validate_model_quality(training_job_name: str, quality_gates: dict, require_
         
         # Mapping of gate names to metric extraction logic
         gate_mappings = {
-            "min_mAP_0_5": lambda: (metrics.get('mAP_0.5', 0.0), ">="),
-            "min_mAP_0_5_0_95": lambda: (metrics.get('mAP_0.5_0.95', 0.0), ">="), 
+            "min_mAP_0_5": lambda: (metrics.get('mAP_0_5', 0.0), ">="),
+            "min_mAP_0_5_0_95": lambda: (metrics.get('mAP_0_5_0_95', 0.0), ">="), 
             "min_precision": lambda: (metrics.get('precision', 0.0), ">="),
             "min_recall": lambda: (metrics.get('recall', 0.0), ">="),
             "min_f1_score": lambda: (metrics.get('f1_score', 0.0), ">="),
@@ -410,6 +437,89 @@ def validate_model_quality(training_job_name: str, quality_gates: dict, require_
             'error': f"Could not validate model quality: {e}",
             'training_job_name': training_job_name
         }
+
+
+def check_and_display_quality_gates(pipeline, execution, pipeline_config: dict) -> dict:
+    """
+    Check quality gates and display results in a formatted table.
+    
+    Args:
+        pipeline: The YOLOSageMakerPipeline instance
+        execution: The pipeline execution object
+        pipeline_config: Configuration dictionary containing approval strategy
+        
+    Returns:
+        dict: Quality gate results including overall_pass, detailed_results, etc.
+    """
+    try:
+        execution_status = execution.describe().get('PipelineExecutionStatus', 'Unknown')
+        if execution_status != 'Succeeded':
+            print(f"\nPipeline status is {execution_status} - skipping quality gate checks")
+            return {'overall_pass': False, 'reason': f'Pipeline status: {execution_status}'}
+        
+        print(f"\nChecking quality gates for approval...")
+        approval_result = pipeline.update_model_approval_after_training(execution)
+        
+        # Display basic results
+        print(f"\nQuality Gate Results:")
+        if approval_result.get('overall_pass'):
+            print(f"Status: PASSED")
+            print(f"Gates passed: {approval_result.get('gates_passed', 'N/A')}")
+            print(f"Recommendation: {approval_result.get('recommendation', 'N/A')}")
+        else:
+            print(f"Status: FAILED")
+            print(f"Gates passed: {approval_result.get('gates_passed', 'N/A')}")
+            print(f"Recommendation: {approval_result.get('recommendation', 'N/A')}")
+        
+        # Display quality gate comparison table
+        detailed_results = approval_result.get('detailed_results', {})
+        if detailed_results:
+            print("\nQuality Gate Comparison:")
+            print("-" * 70)
+            print(f"{'Gate':<20} {'Required':<12} {'Actual':<12} {'Status':<10} {'Gap':<10}")
+            print("-" * 70)
+            
+            for gate_name, gate_info in detailed_results.items():
+                threshold = gate_info.get('threshold', 'N/A')
+                actual = gate_info.get('actual', 'N/A')
+                passes = gate_info.get('passes', False)
+                
+                # Format values
+                if isinstance(threshold, (int, float)) and isinstance(actual, (int, float)):
+                    threshold_str = f"{threshold:.3f}"
+                    actual_str = f"{actual:.3f}"
+                    gap = actual - threshold if gate_name.startswith('min_') else threshold - actual
+                    gap_str = f"{gap:+.3f}"
+                else:
+                    threshold_str = str(threshold)
+                    actual_str = str(actual)
+                    gap_str = "N/A"
+                
+                status_str = "PASS" if passes else "FAIL"
+                
+                # Create proper display names for gates
+                display_name_map = {
+                    'min_mAP_0_5': 'mAP50',
+                    'min_mAP_0_5_0_95': 'mAP50-95',
+                    'min_precision': 'Precision',
+                    'min_recall': 'Recall',
+                    'min_f1_score': 'F1 Score',
+                    'max_model_size_mb': 'Model Size (MB)',
+                    'max_inference_time_ms': 'Inference Time (ms)',
+                    'min_speed_fps': 'Speed (FPS)'
+                }
+                display_name = display_name_map.get(gate_name, gate_name.replace('min_', '').replace('max_', '').replace('_', ' ').title())
+                
+                print(f"{display_name:<20} {threshold_str:<12} {actual_str:<12} {status_str:<10} {gap_str:<10}")
+            
+            print("-" * 70)
+        
+        print(f"Action needed: {approval_result.get('action_needed', 'N/A')}")
+        return approval_result
+        
+    except Exception as e:
+        print(f"Quality gate checking failed: {e}")
+        return {'overall_pass': False, 'error': str(e)}
 
 
 def update_model_package_approval(
