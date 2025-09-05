@@ -104,8 +104,6 @@ def main():
     
     # Train model
     results = model.train(**hyperparams)
-    print("DEBUG: Results:")
-    print(results)
     print("Training completed!!!")
     
     # Generate metrics and export model

@@ -8,6 +8,7 @@ from typing import Dict, Any
 
 import boto3
 import pandas as pd
+from rich import print
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
@@ -17,6 +18,7 @@ from rich.table import Table
 
 from utils.utils_config import (
     get_validation_config,
+    get_approval_config,
     load_config,
     get_inference_config
 )
@@ -281,7 +283,7 @@ def list_specific_job_with_metrics(job_details: dict) -> None:
         return
 
     console.print(
-        f"\n[bold yellow]Attempting to extract metrics from S3 artifacts...[/bold yellow]"
+        f"\n[bold yellow]Extracting metrics from S3 artifacts...[/bold yellow]"
     )
     try:
         s3_uri = job_details["ModelArtifacts"]["S3ModelArtifacts"]
@@ -448,7 +450,7 @@ def extract_metrics_from_s3(s3_uri: str, console: Console) -> dict:
         return None
 
 
-def generate_model_metrics(results, model_dir: str, config: Dict[str, Any] = None):
+def generate_model_metrics(results: dict, model_dir: str, config: Dict[str, Any] = None, training_job_name: str = None) -> None:
     """
     Generate validation metrics for SageMaker Model Registry.
     
@@ -456,6 +458,7 @@ def generate_model_metrics(results, model_dir: str, config: Dict[str, Any] = Non
         results: YOLO training results
         model_dir: Directory to save metrics files
         config: Configuration dictionary (optional, will load default if None)
+        training_job_name: Optional training job name to extract metrics from S3
     """
     print("Generating model metrics for SageMaker Model Registry...")
     
@@ -466,39 +469,90 @@ def generate_model_metrics(results, model_dir: str, config: Dict[str, Any] = Non
         except:
             config = {}
     
-    # Get validation thresholds from config
-    validation_config = get_validation_config(config)
+    # Get quality gates from approval config
+    approval_config = get_approval_config(config)
+    quality_gates_config = approval_config.get('quality_gates', {})
     
     try:
-        # Extract metrics from YOLO results
-        # YOLO results typically contain validation metrics in the last epoch
-        if hasattr(results, 'results_dict'):
-            metrics_dict = results.results_dict
-        else:
-            # Fallback: extract from results object
-            metrics_dict = {}
-            if hasattr(results, 'metrics'):
-                metrics_dict = results.metrics
+        # Try S3 extraction first if training_job_name is provided
+        if training_job_name:
+            try:
+                # Get training job details to extract S3 URI
+                sagemaker_client = boto3.client('sagemaker')
+                job_details = sagemaker_client.describe_training_job(TrainingJobName=training_job_name)
+                s3_uri = job_details["ModelArtifacts"]["S3ModelArtifacts"]
+                
+                # Use the same extraction method as the display table
+                console = Console()
+                metrics_data = extract_metrics_from_s3(s3_uri, console)
+                
+                if metrics_data:
+                    mAP_0_5 = float(metrics_data.get("mAP50", 0.0))
+                    mAP_0_5_0_95 = float(metrics_data.get("mAP50-95", 0.0))
+                    precision = float(metrics_data.get("precision", 0.0))
+                    recall = float(metrics_data.get("recall", 0.0))
+                    epoch = int(metrics_data.get("epoch", 0))
+                    box_loss = float(metrics_data.get("train_box_loss", 0.0))
+                    cls_loss = 0.0  # Not available in S3 data
+                    dfl_loss = 0.0  # Not available in S3 data
+                else:
+                    raise Exception("No metrics data extracted from S3")
+                    
+            except Exception as s3_error:
+                print(f"S3 extraction failed: {s3_error}, falling back to local methods")
+                training_job_name = None  # Force fallback
+        
+        if not training_job_name:
+            # Extract metrics from results.csv file (more reliable than results object)
+            results_csv = os.path.join(model_dir, "results.csv")
+            
+            if os.path.exists(results_csv):
+                # Read metrics from CSV file (same source as the display table)
+                df = pd.read_csv(results_csv)
+                last_row = df.iloc[-1]
+                
+                # Extract key metrics using the same method as save_metrics_for_pipeline
+                mAP_0_5 = float(last_row.get("metrics/mAP50(B)", 0.0))
+                mAP_0_5_0_95 = float(last_row.get("metrics/mAP50-95(B)", 0.0))
+                precision = float(last_row.get("metrics/precision(B)", 0.0))
+                recall = float(last_row.get("metrics/recall(B)", 0.0))
+                epoch = int(last_row.get("epoch", 0))
+                
+                # Try to extract loss metrics
+                box_loss = float(last_row.get("train/box_loss", 0.0))
+                cls_loss = float(last_row.get("train/cls_loss", 0.0))
+                dfl_loss = float(last_row.get("train/dfl_loss", 0.0))
+            else:
+                # Fallback: extract from results object (less reliable)
+                print(f"Warning: results.csv not found at {results_csv}, using results object")
+                mAP_0_5 = float(getattr(results, 'maps', [0.0])[0]) if hasattr(results, 'maps') else 0.0
+                mAP_0_5_0_95 = float(getattr(results, 'map', 0.0)) if hasattr(results, 'map') else 0.0
+                precision = float(getattr(results, 'mp', 0.0)) if hasattr(results, 'mp') else 0.0
+                recall = float(getattr(results, 'mr', 0.0)) if hasattr(results, 'mr') else 0.0
+                epoch = int(getattr(results, 'epoch', 0)) if hasattr(results, 'epoch') else 0
+                box_loss = float(getattr(results, 'box_loss', 0.0)) if hasattr(results, 'box_loss') else 0.0
+                cls_loss = float(getattr(results, 'cls_loss', 0.0)) if hasattr(results, 'cls_loss') else 0.0
+                dfl_loss = float(getattr(results, 'dfl_loss', 0.0)) if hasattr(results, 'dfl_loss') else 0.0
     
-        # YOLO-specific validation metrics for object detection
-        validation_metrics = {
+        # YOLO-specific model metrics for object detection
+        model_metrics = {
             "model_name": "YOLO",
             "validation_time": time.strftime('%Y-%m-%d %H:%M:%S'),
             "metrics": {
-                # Primary YOLO metrics
-                "mAP_0.5": float(getattr(results, 'maps', [0.0])[0]) if hasattr(results, 'maps') else 0.0,
-                "mAP_0.5_0.95": float(getattr(results, 'map', 0.0)) if hasattr(results, 'map') else 0.0,
-                "precision": float(getattr(results, 'mp', 0.0)) if hasattr(results, 'mp') else 0.0,
-                "recall": float(getattr(results, 'mr', 0.0)) if hasattr(results, 'mr') else 0.0,
+                # Primary YOLO metrics - using config naming convention
+                "mAP_0_5": mAP_0_5,
+                "mAP_0_5_0_95": mAP_0_5_0_95,
+                "precision": precision,
+                "recall": recall,
                 
                 # Training metrics
-                "final_epoch": int(getattr(results, 'epoch', 0)) if hasattr(results, 'epoch') else 0,
+                "final_epoch": epoch,
                 "best_fitness": float(getattr(results, 'fitness', 0.0)) if hasattr(results, 'fitness') else 0.0,
                 
                 # Loss metrics
-                "box_loss": float(getattr(results, 'box_loss', 0.0)) if hasattr(results, 'box_loss') else 0.0,
-                "cls_loss": float(getattr(results, 'cls_loss', 0.0)) if hasattr(results, 'cls_loss') else 0.0,
-                "dfl_loss": float(getattr(results, 'dfl_loss', 0.0)) if hasattr(results, 'dfl_loss') else 0.0,
+                "box_loss": box_loss,
+                "cls_loss": cls_loss,
+                "dfl_loss": dfl_loss,
             },
             "model_info": {
                 "parameters": getattr(results, 'model_params', 0),
@@ -507,35 +561,29 @@ def generate_model_metrics(results, model_dir: str, config: Dict[str, Any] = Non
             }
         }
         
-        # Calculate model size if model files exist
-        model_files = ['best.pt', 'last.pt']
+        # Calculate model size if model files exist (ONNX format)
+        model_files = ['best.onnx']
         for model_file in model_files:
             model_path = os.path.join(model_dir, model_file)
             if os.path.exists(model_path):
                 size_mb = os.path.getsize(model_path) / (1024 * 1024)
-                validation_metrics["model_info"]["model_size_mb"] = round(size_mb, 2)
+                model_metrics["model_info"]["model_size_mb"] = round(size_mb, 2)
                 break
         
         # Save evaluation metrics
         evaluation_path = os.path.join(model_dir, "evaluation.json")
         with open(evaluation_path, 'w') as f:
-            json.dump(validation_metrics, f, indent=2)
+            json.dump(model_metrics, f, indent=2)
         print(f"Saved evaluation metrics to: {evaluation_path}")
         
         # Model constraints (thresholds for model approval) - from config
         model_constraints = {
-            "model_quality_constraints": {
-                "min_mAP_0.5": validation_config.get('min_mAP_0_5', 0.3),
-                "min_precision": validation_config.get('min_precision', 0.5),
-                "min_recall": validation_config.get('min_recall', 0.4),
-                "max_model_size_mb": validation_config.get('max_model_size_mb', 500),
-                "max_inference_time_ms": validation_config.get('max_inference_time_ms', 100)
-            },
+            "model_quality_constraints": quality_gates_config,
             "current_performance": {
-                "mAP_0.5": validation_metrics["metrics"]["mAP_0.5"],
-                "precision": validation_metrics["metrics"]["precision"],
-                "recall": validation_metrics["metrics"]["recall"],
-                "model_size_mb": validation_metrics["model_info"]["model_size_mb"]
+                "mAP_0_5": model_metrics["metrics"]["mAP_0_5"],
+                "precision": model_metrics["metrics"]["precision"],
+                "recall": model_metrics["metrics"]["recall"],
+                "model_size_mb": model_metrics["model_info"]["model_size_mb"]
             }
         }
         
@@ -547,35 +595,58 @@ def generate_model_metrics(results, model_dir: str, config: Dict[str, Any] = Non
         
         # Print summary
         print("Model Validation Summary:")
-        print(f"  mAP@0.5: {validation_metrics['metrics']['mAP_0.5']:.3f}")
-        print(f"  mAP@0.5:0.95: {validation_metrics['metrics']['mAP_0.5_0.95']:.3f}")
-        print(f"  Precision: {validation_metrics['metrics']['precision']:.3f}")
-        print(f"  Recall: {validation_metrics['metrics']['recall']:.3f}")
-        print(f"  Model Size: {validation_metrics['model_info']['model_size_mb']:.1f} MB")
+        print(f"  mAP@0.5: {model_metrics['metrics']['mAP_0_5']:.3f}")
+        print(f"  mAP@0.5:0.95: {model_metrics['metrics']['mAP_0_5_0_95']:.3f}")
+        print(f"  Precision: {model_metrics['metrics']['precision']:.3f}")
+        print(f"  Recall: {model_metrics['metrics']['recall']:.3f}")
+        print(f"  Model Size: {model_metrics['model_info']['model_size_mb']:.1f} MB")
         
         # Check if model meets quality constraints
         constraints = model_constraints["model_quality_constraints"]
         current = model_constraints["current_performance"]
         
-        meets_constraints = (
-            current["mAP_0.5"] >= constraints["min_mAP_0.5"] and
-            current["precision"] >= constraints["min_precision"] and
-            current["recall"] >= constraints["min_recall"] and
-            current["model_size_mb"] <= constraints["max_model_size_mb"]
-        )
+        # Check constraints dynamically based on what's available in config
+        meets_constraints = True
+        constraint_checks = []
+        
+        # Check each constraint that exists in config
+        if "min_mAP_0_5" in constraints and "mAP_0_5" in current:
+            check = current["mAP_0_5"] >= constraints["min_mAP_0_5"]
+            constraint_checks.append(check)
+            meets_constraints = meets_constraints and check
+            
+        if "min_precision" in constraints and "precision" in current:
+            check = current["precision"] >= constraints["min_precision"]
+            constraint_checks.append(check)
+            meets_constraints = meets_constraints and check
+            
+        if "min_recall" in constraints and "recall" in current:
+            check = current["recall"] >= constraints["min_recall"]
+            constraint_checks.append(check)
+            meets_constraints = meets_constraints and check
+            
+        if "max_model_size_mb" in constraints and "model_size_mb" in current:
+            check = current["model_size_mb"] <= constraints["max_model_size_mb"]
+            constraint_checks.append(check)
+            meets_constraints = meets_constraints and check
         
         print(f"\nModel Quality Assessment:")
         print(f"  Meets quality constraints: {'YES' if meets_constraints else 'NO'}")
         if not meets_constraints:
             print("  Issues found:")
-            if current["mAP_0.5"] < constraints["min_mAP_0.5"]:
-                print(f"    - mAP@0.5 too low: {current['mAP_0.5']:.3f} < {constraints['min_mAP_0.5']}")
-            if current["precision"] < constraints["min_precision"]:
-                print(f"    - Precision too low: {current['precision']:.3f} < {constraints['min_precision']}")
-            if current["recall"] < constraints["min_recall"]:
-                print(f"    - Recall too low: {current['recall']:.3f} < {constraints['min_recall']}")
-            if current["model_size_mb"] > constraints["max_model_size_mb"]:
-                print(f"    - Model too large: {current['model_size_mb']:.1f} MB > {constraints['max_model_size_mb']} MB")
+            # Check each constraint dynamically
+            if "min_mAP_0_5" in constraints and "mAP_0_5" in current:
+                if current["mAP_0_5"] < constraints["min_mAP_0_5"]:
+                    print(f"    - mAP@0.5 too low: {current['mAP_0_5']:.3f} < {constraints['min_mAP_0_5']}")
+            if "min_precision" in constraints and "precision" in current:
+                if current["precision"] < constraints["min_precision"]:
+                    print(f"    - Precision too low: {current['precision']:.3f} < {constraints['min_precision']}")
+            if "min_recall" in constraints and "recall" in current:
+                if current["recall"] < constraints["min_recall"]:
+                    print(f"    - Recall too low: {current['recall']:.3f} < {constraints['min_recall']}")
+            if "max_model_size_mb" in constraints and "model_size_mb" in current:
+                if current["model_size_mb"] > constraints["max_model_size_mb"]:
+                    print(f"    - Model too large: {current['model_size_mb']:.1f} MB > {constraints['max_model_size_mb']} MB")
         
     except Exception as e:
         print(f"Warning: Could not generate complete metrics: {e}")
@@ -660,7 +731,7 @@ def save_metrics_for_pipeline(model_dir: str, output_dir: str) -> Dict[str, floa
     """
     
     # Look for results.csv in training output
-    results_csv = os.path.join(model_dir, "object_detection_results.csv")
+    results_csv = os.path.join(model_dir, "results.csv")
     
     if not os.path.exists(results_csv):
         print(f"results.csv not found at {results_csv}")

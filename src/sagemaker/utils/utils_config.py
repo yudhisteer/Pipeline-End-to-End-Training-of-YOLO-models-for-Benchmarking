@@ -173,6 +173,19 @@ def get_validation_config(config: Dict[str, Any]) -> Dict[str, Any]:
     return config.get('validation', {})
 
 
+def get_approval_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract approval configuration section.
+    
+    Args:
+        config: Full configuration dictionary
+        
+    Returns:
+        Approval configuration dictionary
+    """
+    return config.get('approval', {})
+
+
 
 def load_training_config():
     """Load training configuration in SageMaker input directory"""

@@ -476,7 +476,7 @@ def check_and_display_quality_gates(pipeline, execution, pipeline_config: dict) 
         if detailed_results:
             print("\nQuality Gate Comparison:")
             print("-" * 70)
-            print(f"{'Gate':<20} {'Required':<12} {'Actual':<12} {'Status':<10} {'Gap':<10}")
+            print(f"{'Gate':<20} {'Required':<12} {'Actual':<12} {'Status':<10} {'Gap %':<10}")
             print("-" * 70)
             
             for gate_name, gate_info in detailed_results.items():
@@ -488,8 +488,19 @@ def check_and_display_quality_gates(pipeline, execution, pipeline_config: dict) 
                 if isinstance(threshold, (int, float)) and isinstance(actual, (int, float)):
                     threshold_str = f"{threshold:.3f}"
                     actual_str = f"{actual:.3f}"
-                    gap = actual - threshold if gate_name.startswith('min_') else threshold - actual
-                    gap_str = f"{gap:+.3f}"
+                    
+                    # Calculate percentage gap relative to threshold
+                    if threshold != 0:
+                        if gate_name.startswith('min_'):
+                            # For minimum thresholds: (actual - threshold) / threshold * 100
+                            gap_percent = ((actual - threshold) / threshold) * 100
+                        else:
+                            # For maximum thresholds: (threshold - actual) / threshold * 100
+                            gap_percent = ((threshold - actual) / threshold) * 100
+                        gap_str = f"{gap_percent:+.0f}%"
+                    else:
+                        # Handle zero threshold case
+                        gap_str = "N/A"
                 else:
                     threshold_str = str(threshold)
                     actual_str = str(actual)
