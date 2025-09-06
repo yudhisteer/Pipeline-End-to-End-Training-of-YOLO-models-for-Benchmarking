@@ -333,65 +333,6 @@ def get_model_from_registry(training_job_name: str = None) -> str:
         raise ModelLoadError(f"Model loading failed: {e}")
 
 
-def extract_evaluation_from_training_job(training_job_name: str) -> dict:
-    """
-    Extract evaluation.json from a SageMaker training job's model.tar.gz output.
-    
-    Args:
-        training_job_name: Name of the completed training job
-        
-    Returns:
-        Dictionary containing evaluation data with 'metrics' and 'model_info' keys
-        
-    Raises:
-        FileNotFoundError: If evaluation.json is not found in the model archive
-        RuntimeError: If extraction fails
-        Exception: For other S3 or SageMaker API errors
-    """
-    # Get training job details to find S3 output path
-    sagemaker_client = boto3.client('sagemaker')
-    job_details = sagemaker_client.describe_training_job(TrainingJobName=training_job_name)
-    output_path = job_details['OutputDataConfig']['S3OutputPath']
-    
-    # Construct path to model.tar.gz
-    s3_model_path = f"{output_path}/{training_job_name}/output/model.tar.gz"
-    
-    # Download and extract model.tar.gz to find evaluation.json
-    s3_client = boto3.client('s3')
-    # Parse S3 path
-    bucket = output_path.split('/')[2]
-    key = '/'.join(output_path.split('/')[3:]) + f"/{training_job_name}/output/model.tar.gz"
-    
-    # Download tar.gz file
-    with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as tar_tmp_file:
-        s3_client.download_fileobj(bucket, key, tar_tmp_file)
-        tar_tmp_file.flush()
-        
-        # Extract evaluation.json from tar.gz
-        with tarfile.open(tar_tmp_file.name, 'r:gz') as tar:
-            # Look for evaluation.json in the tar file
-            evaluation_member = None
-            for member in tar.getmembers():
-                if member.name.endswith('evaluation.json') or member.name == 'evaluation.json':
-                    evaluation_member = member
-                    break
-            
-            if evaluation_member is None:
-                raise FileNotFoundError("evaluation.json not found in the tar.gz file")
-            
-            # Extract and read evaluation.json
-            extracted_file = tar.extractfile(evaluation_member)
-            if extracted_file is None:
-                raise RuntimeError(f"Could not extract {evaluation_member.name}")
-            
-            evaluation_data = json.loads(extracted_file.read().decode('utf-8'))
-        
-        # Clean up temp file
-        os.unlink(tar_tmp_file.name)
-    
-    return evaluation_data
-
-
 def validate_model_quality(training_job_name: str, quality_gates: dict, require_all: bool = True) -> tuple[bool, dict]:
     """
     Validate model quality against quality gates after training is complete.
@@ -432,13 +373,8 @@ def validate_model_quality(training_job_name: str, quality_gates: dict, require_
             }
             model_info = {"model_size_mb": 0.0}  # Placeholder
         else:
-            # Fallback to evaluation.json approach
-            evaluation_data = extract_evaluation_from_training_job(training_job_name)
-            
-            # Handle nested structure from generate_model_metrics function
-            nested_metrics = evaluation_data.get('metrics', {})
-            metrics = nested_metrics if nested_metrics else evaluation_data
-            model_info = evaluation_data.get('model_info', {})
+            # No fallback - if S3 extraction fails, we fail the validation
+            raise Exception("Failed to extract metrics from S3 results.csv - cannot validate quality gates")
         
         # Check each quality gate dynamically
         validation_results = {}

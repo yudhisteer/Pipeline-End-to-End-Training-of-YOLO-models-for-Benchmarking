@@ -24,7 +24,7 @@ from utils.utils_config import (
 )
 from utils.utils_train import get_sagemaker_metric_definitions
 from sagemaker_metrics import display_training_job_metrics
-
+from utils.utils_data import get_s3_dataset_info
 
 class YOLOSageMakerTrainer:
     """
@@ -135,8 +135,6 @@ class YOLOSageMakerTrainer:
             Dictionary with dataset information
         """
         try:
-            from utils.utils_data import get_s3_dataset_info
-            
             # Parse S3 URI to get bucket and prefix
             if self.s3_training_data.startswith("s3://"):
                 bucket = self.s3_training_data.split("/")[2]
@@ -250,25 +248,6 @@ class YOLOSageMakerTrainer:
         except Exception as e:
             print(f"Error displaying training failure logs: {e}")
             print("Check the SageMaker console manually for training job details.")
-    
-    def display_training_metrics(self, training_job_name: str):
-        """Extract and display training metrics for a specific training job."""
-        try:
-            print("\n" + "="*60)
-            print("EXTRACTING TRAINING METRICS")
-            print("="*60)
-            print(f"Training job: {training_job_name}")
-            print("-" * 60)
-
-            display_training_job_metrics(training_job_name, show_metrics=True)
-
-        except ImportError as e:
-            print(f"Could not import sagemaker_metrics: {e}")
-            print("Please ensure sagemaker_metrics.py is available.")
-        except Exception as e:
-            print(f"Error displaying training metrics: {e}")
-            print("You can manually check metrics using:")
-            print(f"  python src/sagemaker/sagemaker_metrics.py {training_job_name}")
     
     def create_estimator(self, verbose: bool = True) -> PyTorch:
         """Create and configure the PyTorch estimator for YOLO training.
@@ -429,7 +408,7 @@ class YOLOSageMakerTrainer:
             # Display metrics if enabled
             if self.runtime_config.get('display_metrics', True):
                 training_job_name = self.estimator.latest_training_job.name
-                self.display_training_metrics(training_job_name)
+                display_training_job_metrics(training_job_name, show_metrics=True)
         else:
             print(f"Training job started. Monitor progress in SageMaker console.")
             print(f"  Job name: {self.estimator.latest_training_job.name}")

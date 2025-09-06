@@ -225,7 +225,7 @@ def list_all_training_jobs_with_metrics(max_results: int = 10) -> dict:
                             last_precision = f"{metrics['precision']:.4f}"
 
                 except Exception as e:
-                    print(f"Debug: S3 extraction failed for {job_name}: {e}")
+                    print(f"S3 extraction failed for {job_name}: {e}")
                     pass
 
             except Exception as e:
@@ -452,15 +452,15 @@ def extract_metrics_from_s3(s3_uri: str, console: Console) -> dict:
 
 def generate_model_metrics(results: dict, model_dir: str, config: Dict[str, Any] = None, training_job_name: str = None) -> None:
     """
-    Generate validation metrics for SageMaker Model Registry.
+    Generate model validation summary (quality gates now use S3 results.csv directly).
     
     Args:
         results: YOLO training results
-        model_dir: Directory to save metrics files
+        model_dir: Directory containing model files
         config: Configuration dictionary (optional, will load default if None)
         training_job_name: Optional training job name to extract metrics from S3
     """
-    print("Generating model metrics for SageMaker Model Registry...")
+    print("Generating model validation summary...")
     
     # Load config if not provided
     if config is None:
@@ -570,28 +570,8 @@ def generate_model_metrics(results: dict, model_dir: str, config: Dict[str, Any]
                 model_metrics["model_info"]["model_size_mb"] = round(size_mb, 2)
                 break
         
-        # Save evaluation metrics
-        evaluation_path = os.path.join(model_dir, "evaluation.json")
-        with open(evaluation_path, 'w') as f:
-            json.dump(model_metrics, f, indent=2)
-        print(f"Saved evaluation metrics to: {evaluation_path}")
-        
-        # Model constraints (thresholds for model approval) - from config
-        model_constraints = {
-            "model_quality_constraints": quality_gates_config,
-            "current_performance": {
-                "mAP_0_5": model_metrics["metrics"]["mAP_0_5"],
-                "precision": model_metrics["metrics"]["precision"],
-                "recall": model_metrics["metrics"]["recall"],
-                "model_size_mb": model_metrics["model_info"]["model_size_mb"]
-            }
-        }
-        
-        # Save model constraints
-        constraints_path = os.path.join(model_dir, "constraints.json")
-        with open(constraints_path, 'w') as f:
-            json.dump(model_constraints, f, indent=2)
-        print(f"Saved model constraints to: {constraints_path}")
+        # Note: We no longer save evaluation.json since quality gates use S3 results.csv directly
+        print(f"Model metrics generated (using S3 results.csv for quality gates)")
         
         # Print summary
         print("Model Validation Summary:")
@@ -601,66 +581,10 @@ def generate_model_metrics(results: dict, model_dir: str, config: Dict[str, Any]
         print(f"  Recall: {model_metrics['metrics']['recall']:.3f}")
         print(f"  Model Size: {model_metrics['model_info']['model_size_mb']:.1f} MB")
         
-        # Check if model meets quality constraints
-        constraints = model_constraints["model_quality_constraints"]
-        current = model_constraints["current_performance"]
-        
-        # Check constraints dynamically based on what's available in config
-        meets_constraints = True
-        constraint_checks = []
-        
-        # Check each constraint that exists in config
-        if "min_mAP_0_5" in constraints and "mAP_0_5" in current:
-            check = current["mAP_0_5"] >= constraints["min_mAP_0_5"]
-            constraint_checks.append(check)
-            meets_constraints = meets_constraints and check
-            
-        if "min_precision" in constraints and "precision" in current:
-            check = current["precision"] >= constraints["min_precision"]
-            constraint_checks.append(check)
-            meets_constraints = meets_constraints and check
-            
-        if "min_recall" in constraints and "recall" in current:
-            check = current["recall"] >= constraints["min_recall"]
-            constraint_checks.append(check)
-            meets_constraints = meets_constraints and check
-            
-        if "max_model_size_mb" in constraints and "model_size_mb" in current:
-            check = current["model_size_mb"] <= constraints["max_model_size_mb"]
-            constraint_checks.append(check)
-            meets_constraints = meets_constraints and check
-        
-        print(f"\nModel Quality Assessment:")
-        print(f"  Meets quality constraints: {'YES' if meets_constraints else 'NO'}")
-        if not meets_constraints:
-            print("  Issues found:")
-            # Check each constraint dynamically
-            if "min_mAP_0_5" in constraints and "mAP_0_5" in current:
-                if current["mAP_0_5"] < constraints["min_mAP_0_5"]:
-                    print(f"    - mAP@0.5 too low: {current['mAP_0_5']:.3f} < {constraints['min_mAP_0_5']}")
-            if "min_precision" in constraints and "precision" in current:
-                if current["precision"] < constraints["min_precision"]:
-                    print(f"    - Precision too low: {current['precision']:.3f} < {constraints['min_precision']}")
-            if "min_recall" in constraints and "recall" in current:
-                if current["recall"] < constraints["min_recall"]:
-                    print(f"    - Recall too low: {current['recall']:.3f} < {constraints['min_recall']}")
-            if "max_model_size_mb" in constraints and "model_size_mb" in current:
-                if current["model_size_mb"] > constraints["max_model_size_mb"]:
-                    print(f"    - Model too large: {current['model_size_mb']:.1f} MB > {constraints['max_model_size_mb']} MB")
+        # Note: Quality gate validation is now handled separately using S3 results.csv
         
     except Exception as e:
-        print(f"Warning: Could not generate complete metrics: {e}")
-        # Create minimal metrics file
-        minimal_metrics = {
-            "model_name": "YOLO",
-            "validation_time": time.strftime('%Y-%m-%d %H:%M:%S'),
-            "status": "training_completed",
-            "error": str(e)
-        }
-        
-        evaluation_path = os.path.join(model_dir, "evaluation.json")
-        with open(evaluation_path, 'w') as f:
-            json.dump(minimal_metrics, f, indent=2)
+        print(f"Warning: Could not generate model validation summary: {e}")
 
 
 def send_metrics_to_cloudwatch(recall: float, map_50: float, region: str = None) -> bool:

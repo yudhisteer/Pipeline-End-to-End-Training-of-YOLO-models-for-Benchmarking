@@ -15,10 +15,9 @@ from sagemaker.workflow.pipeline_context import PipelineSession
 from sagemaker.model_metrics import ModelMetrics, MetricsSource
 
 from utils.utils_config import load_config, get_validation_config
-from utils.utils_train import extract_evaluation_from_training_job, validate_model_quality, update_model_package_approval, check_and_display_quality_gates
+from utils.utils_train import validate_model_quality, update_model_package_approval, check_and_display_quality_gates
 from entrypoint_trainer import YOLOSageMakerTrainer
 from sagemaker_metrics import display_training_job_metrics
-
 
 logging.getLogger('sagemaker').setLevel(logging.ERROR)
 logging.getLogger('sagemaker.workflow.utilities').setLevel(logging.ERROR)
@@ -129,35 +128,14 @@ class YOLOSageMakerPipeline:
             model_data=training_step.properties.ModelArtifacts.S3ModelArtifacts,
             content_types=["application/x-onnx", "application/json"],
             response_types=["application/json"],
-            inference_instances=["ml.m5.large", "ml.m5.xlarge", "ml.g4dn.xlarge"],
-            transform_instances=["ml.m5.large", "ml.m5.xlarge"],
+            inference_instances=self.config.get('registry', {}).get('model_package', {}).get('inference_instances'),
+            transform_instances=self.config.get('registry', {}).get('model_package', {}).get('transform_instances'),
             model_package_group_name=self.model_package_group_name,
             approval_status=approval_status,
-            model_metrics=self._create_model_metrics()
+            model_metrics=None  # No longer using evaluation.json/constraints.json - quality gates use S3 results.csv directly
         )
-        
         
         return registration_step
-    
-    def _create_model_metrics(self):
-        """
-        Create model metrics for YOLO model validation and registration.
-        
-        Returns:
-            ModelMetrics object with YOLO-specific validation metrics
-        """
-        model_statistics = ModelMetrics(
-            model_statistics=MetricsSource(
-                s3_uri=f"{self.trainer.s3_model_output}/evaluation.json",
-                content_type="application/json"
-            ),
-            model_constraints=MetricsSource(
-                s3_uri=f"{self.trainer.s3_model_output}/constraints.json",
-                content_type="application/json"
-            )
-        )
-        
-        return model_statistics
     
     def validate_model_quality_post_training(self, training_job_name: str) -> tuple[bool, dict]:
         """
@@ -551,10 +529,10 @@ class YOLOSageMakerPipeline:
             print("Check the SageMaker console for training job details.")
 
     def _display_training_metrics_from_execution(self, execution):
-        """Extract training job name and delegate to trainer for metrics display."""
+        """Extract training job name and display metrics directly."""
         training_job_name = self._get_training_job_name_from_execution(execution)
         if training_job_name:
-            self.trainer.display_training_metrics(training_job_name)
+            display_training_job_metrics(training_job_name, show_metrics=True)
         else:
             print("Could not find training job name from pipeline execution.")
             print("You can manually check metrics using:")

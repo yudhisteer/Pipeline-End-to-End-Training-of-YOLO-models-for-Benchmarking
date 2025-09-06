@@ -238,7 +238,7 @@ def postprocess_predictions(predictions: np.ndarray, confidence_threshold: float
         print(f"Processing {batch_pred.shape[0]} anchor predictions")
         print(f"Each prediction has {batch_pred.shape[1]} features")
         
-        # Debug: Show some sample values
+        # Show some sample values
         print(f"Sample prediction values:")
         print(f"  First prediction: {batch_pred[0]}")
         print(f"  Min values: {np.min(batch_pred, axis=0)}")
@@ -360,7 +360,7 @@ def process_batch_images(body: dict, model: ort.InferenceSession) -> dict:
 def process_image_chunk(image_chunk: list[dict], model: ort.InferenceSession, confidence_threshold: float) -> list[dict]:
     """Process a chunk of images"""
     chunk_results = []
-    print(f"DEBUG: Starting batch processing")
+    print(f"Starting batch processing")
     
     for img_info in image_chunk:
         try:
@@ -392,7 +392,7 @@ def process_image_chunk(image_chunk: list[dict], model: ort.InferenceSession, co
             })
             
         except Exception as e:
-            print(f"DEBUG: Error in process_batch_images: {str(e)}")
+            print(f"Error in process_batch_images: {str(e)}")
             import traceback
             traceback.print_exc()
             raise e
