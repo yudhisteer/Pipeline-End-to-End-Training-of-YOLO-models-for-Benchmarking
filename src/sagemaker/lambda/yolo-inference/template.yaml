@@ -36,6 +36,7 @@ Resources:
             - Effect: Allow
               Action:
                 - sagemaker:DescribeTrainingJob
+                - sagemaker:ListTrainingJobs
               Resource: "*"
       Environment:
         Variables:
