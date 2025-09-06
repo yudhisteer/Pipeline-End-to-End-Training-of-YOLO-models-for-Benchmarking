@@ -1,5 +1,4 @@
-# YOLO Pipeline
-.PHONY: deploy inference train
+.PHONY: deploy inference train finetuning pipeline
 
 # Deploy YOLO Lambda function
 deploy:
@@ -12,3 +11,11 @@ inference:
 # Run YOLO training
 train:
 	@./run.sh train
+
+# Run YOLO finetuning
+finetuning:
+	@./run.sh finetuning
+
+# Run YOLO pipeline
+pipeline:
+	@./run.sh pipeline
