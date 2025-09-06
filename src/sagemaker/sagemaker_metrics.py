@@ -2,10 +2,10 @@ import sys
 import argparse
 import boto3
 import yaml
+from rich import print
 from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
-
 
 from utils.utils_metrics import (
     get_training_job_details, 

@@ -10,6 +10,8 @@ import yaml
 import tarfile
 from pathlib import Path
 
+from rich import print
+
 
 def install_ultralytics():
     """Install ultralytics if not available."""

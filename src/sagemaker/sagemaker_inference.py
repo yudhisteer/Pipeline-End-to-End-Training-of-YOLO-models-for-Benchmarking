@@ -2,6 +2,8 @@ import requests
 import subprocess
 import yaml
 
+from rich import print
+
 
 
 from utils.utils_config import load_config, get_inference_config

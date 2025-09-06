@@ -1,8 +1,3 @@
-"""
-Simple POC for YOLO Hyperparameter Tuning using SageMaker.
-Extends the existing YOLOSageMakerTrainer for hyperparameter optimization.
-"""
-
 import os
 import pandas as pd
 import yaml
@@ -10,7 +5,7 @@ import re
 from datetime import datetime
 from typing import Dict, Any
 
-
+from rich import print
 from sagemaker.tuner import HyperparameterTuner
 
 from entrypoint_trainer import YOLOSageMakerTrainer
@@ -24,8 +19,7 @@ from utils.utils_finetuning import (
 
 class YOLOHyperparameterTuner:
     """
-    Simple POC for YOLO hyperparameter tuning using SageMaker.
-    Focuses on key parameters: learning rate, batch size, and optimizer.
+    Hyperparameter tuning using SageMaker.
     """
     
     def __init__(self, config_path: str = "config.yaml"):
@@ -66,11 +60,12 @@ class YOLOHyperparameterTuner:
         hyperparameter_ranges = self.get_hyperparameter_ranges()
         
         # Configure tuning job from config
-        max_jobs = self.tuning_config.get('max_jobs', 6)
-        max_parallel_jobs = self.tuning_config.get('max_parallel_jobs', 2)
-        objective_metric = f"yolo:{self.tuning_config.get('objective_metric', 'mAP_0.5')}"
-        objective_type = self.tuning_config.get('objective_type', 'Maximize')
-        
+        max_jobs = self.tuning_config.get('max_jobs')
+        max_parallel_jobs = self.tuning_config.get('max_parallel_jobs')
+        objective_metric = f"yolo:{self.tuning_config.get('objective_metric')}"
+        objective_type = self.tuning_config.get('objective_type')
+        strategy = self.tuning_config.get('strategy')
+
         # Create tuner
         tuner = HyperparameterTuner(
             estimator=estimator,
@@ -80,6 +75,7 @@ class YOLOHyperparameterTuner:
             max_jobs=max_jobs,
             max_parallel_jobs=max_parallel_jobs,
             objective_type=objective_type,
+            strategy=strategy,
             base_tuning_job_name=self.tuning_job_name
         )
         
@@ -341,7 +337,7 @@ class YOLOHyperparameterTuner:
             Tuning job information
         """
         print("="*60)
-        print("Starting YOLO Hyperparameter Tuning POC")
+        print("Starting YOLO Hyperparameter Tuning")
         print("="*60)
         
         # Start tuning job
@@ -367,8 +363,10 @@ class YOLOHyperparameterTuner:
 
 def main():
     """Main function for standalone execution."""
-    config_path = os.environ.get("YOLO_CONFIG_PATH", "config.yaml")
-    wait_for_completion = os.environ.get("YOLO_WAIT", "true").lower() == "true"
+    config_path = "config.yaml"
+    config = load_config(config_path)
+    wait_for_completion = config.get("runtime", {}).get("wait_for_completion", True)
+
     
     try:
         print(f"Loading configuration from: {config_path}")
@@ -391,8 +389,6 @@ if __name__ == "__main__":
 
 # Example usage:
 """
-Simple POC for YOLO hyperparameter tuning.
-
 Usage Examples:
 
 1. Run tuning job (basic):

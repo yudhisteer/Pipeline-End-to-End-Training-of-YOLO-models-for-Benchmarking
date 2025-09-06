@@ -12,6 +12,7 @@ from sagemaker.processing import ProcessingInput, ProcessingOutput
 
 import yaml
 from dotenv import load_dotenv
+from rich import print
 
 class MinimalYOLOEvaluationPipeline:
     """Minimal YOLO evaluation pipeline."""

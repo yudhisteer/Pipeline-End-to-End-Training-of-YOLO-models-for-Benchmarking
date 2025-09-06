@@ -9,6 +9,7 @@ import json
 import yaml
 import argparse
 from typing import Dict, Any, List, Tuple
+from rich import print
 
 import boto3
 import s3fs
