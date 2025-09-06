@@ -344,9 +344,10 @@ def list_specific_job_with_metrics(job_details: dict) -> None:
         )
 
 
-def extract_metrics_from_s3(s3_uri: str, console: Console) -> dict:
+def extract_metrics_from_s3(s3_uri: str) -> dict:
     """Extract evaluation_metrics.json from S3 model artifacts"""
     try:
+        console = Console()
         s3 = boto3.client("s3")
 
         bucket = s3_uri.replace("s3://", "").split("/")[0]

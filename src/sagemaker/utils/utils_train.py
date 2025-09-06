@@ -115,7 +115,7 @@ def list_registry_models():
             "ModelPackageGroupName": MODEL_GROUP,
             "SortBy": "CreationTime",
             "SortOrder": "Descending",
-            "MaxResults": registry_config.get('max_results_display', 20)
+            "MaxResults": registry_config.get('max_results_display', 5)
         }
         
         try:
@@ -156,12 +156,23 @@ def list_registry_models():
                     print(f"   Approval: {approval_status}")
                     print(f"   Created: {creation_time}")
                     
-                    # get metrics using the existing function
+                    # get metrics using S3 URI from model package
                     print(f"Metrics for this model:")
                     try:
-                        list_specific_job_with_metrics(training_job)
+                        # Use the same approach as list_specific_job_with_metrics but simplified
+                        from .utils_metrics import extract_metrics_from_s3
+
+                        metrics = extract_metrics_from_s3(model_s3_uri)
+                        
+                        if metrics:
+                            print(f"  mAP@0.5: {metrics.get('mAP50', 'N/A')}")
+                            print(f"  mAP@0.5:0.95: {metrics.get('mAP50-95', 'N/A')}")
+                            print(f"  Precision: {metrics.get('precision', 'N/A')}")
+                            print(f"  Recall: {metrics.get('recall', 'N/A')}")
+                        else:
+                            print("  No metrics found in model artifacts")
                     except Exception as metrics_error:
-                        print(f"Could not fetch metrics: {str(metrics_error)[:100]}...")
+                        print(f"  Could not fetch metrics: {str(metrics_error)[:100]}...")
                     
                     print(f"S3 Location: s3://{bucket}/{key}")
                     print("-" * 80)
