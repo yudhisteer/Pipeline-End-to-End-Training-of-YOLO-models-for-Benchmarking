@@ -214,3 +214,4 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 src/sagemaker/lambda/yolo-inference/app/config.yaml
+src/sagemaker/lambda/yolo-inference/.aws-sam/build.toml
