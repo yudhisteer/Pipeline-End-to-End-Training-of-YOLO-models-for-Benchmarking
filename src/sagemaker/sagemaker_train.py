@@ -211,6 +211,8 @@ class YOLOSageMakerPipeline:
                         training_job_name = step['Metadata']['TrainingJob']['Arn'].split('/')[-1]
                         break
             
+            print(f"Training job name extracted: {training_job_name}")
+            
             if not training_job_name:
                 return {'error': 'Could not find training job name from execution'}
             
@@ -219,7 +221,7 @@ class YOLOSageMakerPipeline:
             
             # Get approval configuration
             approval_config = self.registry_config.get('approval', {})
-            model_package_group = self.registry_config.get('model_package_group_name', 'yolo-model-group')
+            model_package_group = self.registry_config.get('model_package_group_name', 'yolo-model-package-group-object-detection')
             
             # determine approval action
             if passes_gates:
@@ -228,6 +230,9 @@ class YOLOSageMakerPipeline:
                     # Automatically approve the model
                     approval_description = f"Automatically approved - passed all quality gates: {validation_report['gates_passed']}"
                     try:
+                        print(f"Updating model approval using training job lookup method")
+                        print(f"Training Job Name: {training_job_name}")
+                        print(f"Model Package Group: {model_package_group}")
                         approval_result = update_model_package_approval(
                             training_job_name=training_job_name,
                             model_package_group_name=model_package_group,
@@ -252,6 +257,9 @@ class YOLOSageMakerPipeline:
                 if approval_config.get('auto_reject_on_failure'):
                     approval_description = f"Automatically rejected - failed quality gates: {validation_report['gates_passed']}"
                     try:
+                        print(f"Updating model approval using training job lookup method for rejection")
+                        print(f"Training Job Name: {training_job_name}")
+                        print(f"Model Package Group: {model_package_group}")
                         approval_result = update_model_package_approval(
                             training_job_name=training_job_name,
                             model_package_group_name=model_package_group,
