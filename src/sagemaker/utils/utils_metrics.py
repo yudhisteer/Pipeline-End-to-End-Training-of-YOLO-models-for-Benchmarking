@@ -203,7 +203,7 @@ def list_all_training_jobs_with_metrics(max_results: int = 10) -> dict:
 
                 try:
                     s3_uri = job_details["ModelArtifacts"]["S3ModelArtifacts"]
-                    metrics = extract_metrics_from_s3(s3_uri, console)
+                    metrics = extract_metrics_from_s3(s3_uri)
 
                     if metrics:
                         # best epoch metrics
@@ -287,7 +287,7 @@ def list_specific_job_with_metrics(job_details: dict) -> None:
     )
     try:
         s3_uri = job_details["ModelArtifacts"]["S3ModelArtifacts"]
-        metrics = extract_metrics_from_s3(s3_uri, console)
+        metrics = extract_metrics_from_s3(s3_uri)
 
         if metrics:
             console.print(f"\n[bold green]Extracted Training Metrics[/bold green]")
@@ -484,8 +484,7 @@ def generate_model_metrics(results: dict, model_dir: str, config: Dict[str, Any]
                 s3_uri = job_details["ModelArtifacts"]["S3ModelArtifacts"]
                 
                 # Use the same extraction method as the display table
-                console = Console()
-                metrics_data = extract_metrics_from_s3(s3_uri, console)
+                metrics_data = extract_metrics_from_s3(s3_uri)
                 
                 if metrics_data:
                     mAP_0_5 = float(metrics_data.get("mAP50", 0.0))

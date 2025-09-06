@@ -11,7 +11,7 @@ from utils.utils_config import load_registry_config
 from utils.utils_exceptions import ModelLoadError
 from utils.utils_metrics import list_all_training_jobs_with_metrics 
 from utils.utils_s3 import parse_s3_uri, object_exists
-from utils.utils_metrics import list_specific_job_with_metrics
+from utils.utils_metrics import extract_metrics_from_s3
 
 
 def get_sagemaker_metric_definitions(task_type: str = "object_detection") -> list:
@@ -159,8 +159,6 @@ def list_registry_models():
                     # get metrics using S3 URI from model package
                     print(f"Metrics for this model:")
                     try:
-                        # Use the same approach as list_specific_job_with_metrics but simplified
-                        from .utils_metrics import extract_metrics_from_s3
 
                         metrics = extract_metrics_from_s3(model_s3_uri)
                         
@@ -384,13 +382,7 @@ def validate_model_quality(training_job_name: str, quality_gates: dict, require_
         job_details = sagemaker_client.describe_training_job(TrainingJobName=training_job_name)
         s3_uri = job_details["ModelArtifacts"]["S3ModelArtifacts"]
         
-        # Import extract_metrics_from_s3 and Console
-        from rich.console import Console
-        from .utils_metrics import extract_metrics_from_s3
-        
-        # Use the same extraction method as the display table
-        console = Console()
-        s3_metrics = extract_metrics_from_s3(s3_uri, console)
+        s3_metrics = extract_metrics_from_s3(s3_uri)
         
         if s3_metrics:
             # Convert S3 metrics to the format expected by quality gates
