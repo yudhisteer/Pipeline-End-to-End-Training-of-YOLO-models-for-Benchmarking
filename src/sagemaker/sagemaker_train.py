@@ -121,6 +121,10 @@ class YOLOSageMakerPipeline:
         approval_status = "PendingManualApproval"
         approval_reason = "Pending quality gate validation after training completes"
         
+        # Create model metrics using results.csv from training output
+        # This provides evaluation metrics in SageMaker Model Registry UI while quality gates continue to use S3 results.csv
+        model_metrics = self._create_model_metrics(training_step)
+        
         # create model registration step
         registration_step = RegisterModel(
             name=self.registration_step_name,
@@ -132,10 +136,39 @@ class YOLOSageMakerPipeline:
             transform_instances=self.config.get('registry', {}).get('model_package', {}).get('transform_instances'),
             model_package_group_name=self.model_package_group_name,
             approval_status=approval_status,
-            model_metrics=None  # No longer using evaluation.json/constraints.json - quality gates use S3 results.csv directly
+            model_metrics=model_metrics  # Include evaluation metrics for SageMaker Model Registry UI
         )
         
         return registration_step
+    
+    def _create_model_metrics(self, training_step: TrainingStep) -> ModelMetrics:
+        """
+        Create ModelMetrics object for SageMaker Model Registry.
+        
+        Args:
+            training_step: The training step that produces model artifacts
+            
+        Returns:
+            ModelMetrics object with evaluation metrics from results.csv
+        """
+        # Use Join to properly concatenate pipeline properties with strings
+        from sagemaker.workflow.functions import Join
+        
+        # Create S3 URI for results.csv using Join function for pipeline properties
+        metrics_s3_uri = Join(
+            on="",
+            values=[training_step.properties.ModelArtifacts.S3ModelArtifacts, "/results.csv"]
+        )
+        
+        # Create model metrics with reference to results.csv
+        model_metrics = ModelMetrics(
+            model_statistics=MetricsSource(
+                s3_uri=metrics_s3_uri,
+                content_type="text/csv"
+            )
+        )
+        
+        return model_metrics
     
     def validate_model_quality_post_training(self, training_job_name: str) -> tuple[bool, dict]:
         """

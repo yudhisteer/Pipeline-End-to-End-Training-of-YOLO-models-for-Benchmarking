@@ -90,9 +90,17 @@ def list_registry_models():
     List models in the SageMaker Model Registry with their metrics and details.
     """
     try:
-        config = load_registry_config()
-        MODEL_GROUP = config.get("model_package_group_name")
-        region = config['aws_region']
+        # Load full config to access AWS region
+        from utils.utils_config import load_config
+        full_config = load_config()
+        registry_config = full_config.get('registry', {})
+        pipeline_config = full_config.get('pipeline', {})
+        aws_config = full_config.get('aws', {})
+        
+        # Model package group name is defined in pipeline config
+        MODEL_GROUP = pipeline_config.get("model_package_group_name")
+        region = aws_config.get('region')  # Get region from aws.region in config
+        
         if region:
             sm_client = boto3.client("sagemaker", region_name=region)
             s3_client = boto3.client("s3", region_name=region)
@@ -107,7 +115,7 @@ def list_registry_models():
             "ModelPackageGroupName": MODEL_GROUP,
             "SortBy": "CreationTime",
             "SortOrder": "Descending",
-            "MaxResults": config['registry']['max_results_display']
+            "MaxResults": registry_config.get('max_results_display', 20)
         }
         
         try:
@@ -129,7 +137,7 @@ def list_registry_models():
                     
                     # extract training job name from path
                     training_job = "unknown"
-                    training_patterns = config['registry']['training_job_patterns']
+                    training_patterns = registry_config.get('training_job_patterns', ['YOLOTraining', 'pipelines-'])
                     for part in path_parts:
                         if any(pattern in part for pattern in training_patterns):
                             training_job = part
@@ -192,12 +200,22 @@ def get_model_from_registry(training_job_name: str = None) -> str:
         print("Searching for best model in SageMaker Model Registry...")
     
     try:
-        config = load_registry_config()
-        MODEL_GROUP = config.get("model_package_group_name")
-        METRIC_KEY = config.get("metric_key")
+        # Load full config to access AWS region
+        from utils.utils_config import load_config
+        full_config = load_config()
+        registry_config = full_config.get('registry', {})
+        pipeline_config = full_config.get('pipeline', {})
+        aws_config = full_config.get('aws', {})
+        
+        # Model package group name is defined in pipeline config
+        MODEL_GROUP = pipeline_config.get("model_package_group_name")
+        METRIC_KEY = registry_config.get("metric_key")
+        
+        # Get temp files config early for later use
+        temp_files_config = registry_config.get('temp_files', {})
         
         # use region from config if available
-        region = config.get("aws_region")
+        region = aws_config.get('region')
         if region:
             sm_client = boto3.client("sagemaker", region_name=region)
             s3_client = boto3.client("s3", region_name=region)
@@ -210,7 +228,7 @@ def get_model_from_registry(training_job_name: str = None) -> str:
             "ModelPackageGroupName": MODEL_GROUP,
             "SortBy": "CreationTime", 
             "SortOrder": "Descending",
-            "MaxResults": config.get("max_results")
+            "MaxResults": registry_config.get("max_results", 50)
         }
         
         best_model = {"metric": -math.inf, "model_s3": None, "arn": None}
@@ -282,11 +300,11 @@ def get_model_from_registry(training_job_name: str = None) -> str:
         
         # download the best model
         bucket, key = parse_s3_uri(best_model["model_s3"])
-        model_tar_path = config.get("temp_files").get("model_archive")
+        model_tar_path = temp_files_config.get("model_archive", "temp_model.tar.gz")
         s3_client.download_file(bucket, key, model_tar_path)
         
         # extract the model
-        model_extract_dir = config['registry']['temp_files']['model_extract_dir']
+        model_extract_dir = temp_files_config.get('model_extract_dir', 'temp_model_dir')
         
         # Create training job-specific directory
         if training_job_name:
